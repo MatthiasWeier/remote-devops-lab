@@ -1,21 +1,19 @@
-# 1. Fetch the latest Ubuntu 22.04 image from Oracle
 data "oci_core_images" "ubuntu" {
   compartment_id           = var.tenancy_ocid
   operating_system         = "Canonical Ubuntu"
-  operating_system_version = "22.04"
-  shape                    = "VM.Standard.E5.Flex"
+  operating_system_version = var.os_version
+  shape                    = var.instance_shape
 }
 
-# 2. Create the Sandbox Instance
 resource "oci_core_instance" "terraform_test" {
   availability_domain = data.oci_identity_availability_domains.ads.availability_domains[0].name
   compartment_id      = var.tenancy_ocid
-  display_name        = "Terraform-Sandbox-Server"
-  shape               = "VM.Standard.E5.Flex"
+  display_name        = var.instance_name
+  shape               = var.instance_shape
 
   shape_config {
-    ocpus         = 1
-    memory_in_gbs = 4
+    ocpus         = var.instance_cpus
+    memory_in_gbs = var.instance_ram
   }
 
   create_vnic_details {    
@@ -30,10 +28,10 @@ resource "oci_core_instance" "terraform_test" {
 
   metadata = {   
     ssh_authorized_keys = file(var.ssh_public_key_path)
+    user_data           = base64encode(file(var.cloud_init_script))
   }
 }
 
-# 3. Output the public IP address after creation
 output "instance_ip" {
   value = oci_core_instance.terraform_test.public_ip
 }
