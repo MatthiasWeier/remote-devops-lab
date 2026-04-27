@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  reverse-proxy:
+    image: 'jc21/nginx-proxy-manager:latest'
+    container_name: nginx-proxy-manager
+    restart: unless-stopped
+    ports:
+      - '80:80'     # Public HTTP Traffic
+      - '81:81'     # Admin Web Interface
+      - '443:443'   # Public HTTPS (SSL) Traffic
+    volumes:
+      - ./data:/data
+      - ./letsencrypt:/etc/letsencrypt
+    networks:
+      - proxy-tier
+
+# Define a custom network for secure internal routing
+networks:
+  proxy-tier:
+    name: proxy-tier
+    driver: bridge

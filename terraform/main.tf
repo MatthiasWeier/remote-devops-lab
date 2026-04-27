@@ -28,7 +28,6 @@ resource "oci_core_instance" "terraform_test" {
 
   metadata = {   
     ssh_authorized_keys = file(var.ssh_public_key_path)
-    user_data           = base64encode(file(var.cloud_init_script))
   }
 }
 
