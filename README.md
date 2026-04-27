@@ -46,15 +46,20 @@ Focus: Deploy visible applications that utilize the server's resources.
 
 ### Folder Structure
 
+```text
 remote-devops-lab/
 ├── .gitignore                  
 ├── README.md                   
-├── terraform/                  # Phase 2: Infrastructure as Code (IaC)
-│   ├── main.tf                 # Cloud resource creation
-│   ├── provider.tf             # Oracle Cloud Plugin configuration
+├── terraform/                  
+│   ├── main.tf                 
+│   ├── provider.tf             
 │   ├── variables.tf            
 │   └── terraform.tfvars        
-└── docker/                     # Phase 1, 3 & 4: Container Deployments
+├── ansible/                    
+│   ├── inventory.ini           
+│   ├── setup-docker.yml        
+│   └── deploy-proxy.yml        
+└── docker/                     
     ├── portainer/
     │   └── docker-compose.yml
     ├── reverse-proxy/
