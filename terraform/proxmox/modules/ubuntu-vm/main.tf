@@ -6,7 +6,7 @@ resource "proxmox_virtual_environment_vm" "proxmox_vm" {
 
   # Clone configuration
   clone {
-    vm_id = 999 # Replace with your Template-ID (e.g. 999)
+    vm_id = 1001 # Replace with your Template-ID (e.g. 999)
     full  = true
   }
 
