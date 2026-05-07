@@ -1,0 +1,22 @@
+# Terraform-specific files to ignore
+
+# Local Terraform directory
+.terraform/
+
+# Terraform state files
+*.tfstate
+*.tfstate.*
+
+# Terraform crash logs
+crash.log
+crash.*.log
+
+# Terraform plan files
+*.tfplan
+
+# Auto-generated .tfvars files
+*.tfvars
+
+# Secrets and sensitive data
+secrets.tfvars
+*.secret
