@@ -1,0 +1,31 @@
+# Proxmox API Configuration
+proxmox_api_url         = "https://your-proxmox-host:8006/api2/json"
+proxmox_api_token_id    = "user@realm!token_name"
+proxmox_api_token_secret = "your-api-token-secret"
+proxmox_node_name       = "pve"
+network_bridge          = "vmbr0"
+ssh_public_key_path     = "~/.ssh/id_rsa.pub"
+
+# VM Configuration Map
+# Each VM can have completely different specifications
+vms = {
+  "debian-webserver" = {
+    vmid       = 100
+    clone_from = "debian-13-cloudinit"
+    cores      = 2
+    memory     = 2048      # 2 GB RAM
+    disk_size  = 32
+    ip_address = "192.168.1.100/24"
+    gateway    = "192.168.1.1"
+  }
+
+  "debian-database" = {
+    vmid       = 101
+    clone_from = "debian-13-cloudinit"
+    cores      = 4
+    memory     = 8192      # 8 GB RAM
+    disk_size  = 100
+    ip_address = "192.168.1.101/24"
+    gateway    = "192.168.1.1"
+  }
+}

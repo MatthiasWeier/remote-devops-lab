@@ -34,3 +34,23 @@ variable "ssh_public_key_path" {
   # Default value can be adjusted here, e.g., "~/id_rsa.pub"
   default = "~/.ssh/id_rsa.pub"
 }
+
+variable "vms" {
+  description = "Map of VMs to create with their specifications."
+  type = map(object({
+    vmid       = number
+    clone_from = string
+    cores      = number
+    memory     = number
+    disk_size  = number
+    ip_address = string
+    gateway    = string
+  }))
+  default = {}
+}
+
+variable "network_bridge" {
+  description = "The Proxmox network bridge to use (e.g., vmbr0)"
+  type        = string
+  default     = "vmbr0"
+}
