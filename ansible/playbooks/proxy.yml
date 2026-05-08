@@ -1,0 +1,42 @@
+---
+# Playbook to setup Proxy nodes with reverse proxy
+
+- name: Configure Proxy nodes
+  hosts: proxy_nodes
+  become: yes
+  gather_facts: yes
+  tags:
+    - proxy
+    - proxy_nodes
+
+  pre_tasks:
+    - name: Display target hosts
+      debug:
+        msg: "Configuring Proxy on {{ inventory_hostname }}"
+      tags:
+        - always
+
+  roles:
+    - role: docker_setup
+      tags:
+        - docker
+        - docker_setup
+
+    - role: deploy_compose
+      tags:
+        - docker
+        - deploy_compose
+
+  post_tasks:
+    - name: Verify reverse proxy is running
+      command: docker ps --filter "name=nginx-proxy" --format "table {{.Names}}\t{{.Status}}"
+      register: proxy_status
+      changed_when: false
+      tags:
+        - verify
+
+    - name: Display proxy status
+      debug:
+        msg: "{{ proxy_status.stdout_lines }}"
+      tags:
+        - verify

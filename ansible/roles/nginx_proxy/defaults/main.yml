@@ -1,0 +1,3 @@
+---
+# Default variables for nginx_proxy role
+nginx_proxy_port: 80

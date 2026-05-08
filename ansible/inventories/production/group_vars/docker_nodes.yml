@@ -1,0 +1,12 @@
+---
+# Variables for docker_nodes group
+# These hosts will have Docker Engine installed and will run containerized applications
+
+# Docker configuration
+docker_version: latest
+docker_compose_version: latest
+
+# Applications to deploy on docker nodes
+compose_apps:
+  - portainer
+  - monitoring

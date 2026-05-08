@@ -1,0 +1,51 @@
+---
+# Tasks to deploy Docker Compose applications
+
+- name: Ensure /opt/docker directory exists
+  file:
+    path: /opt/docker
+    state: directory
+    mode: '0755'
+  tags:
+    - deploy
+    - compose
+
+- name: "Create application directory for {{ item }}"
+  file:
+    path: "/opt/docker/{{ item }}"
+    state: directory
+    mode: '0755'
+  loop: "{{ compose_apps | default([]) }}"
+  tags:
+    - deploy
+    - compose
+
+- name: "Synchronize docker-compose files for {{ item }}"
+  synchronize:
+    src: "../../docker/{{ item }}/"
+    dest: "/opt/docker/{{ item }}/"
+    delete: yes
+    recursive: yes
+  loop: "{{ compose_apps | default([]) }}"
+  tags:
+    - deploy
+    - compose
+
+- name: "Start Docker Compose services for {{ item }}"
+  community.docker.docker_compose_v2:
+    project_src: "/opt/docker/{{ item }}"
+    state: present
+    pull: always
+  register: compose_result
+  loop: "{{ compose_apps | default([]) }}"
+  tags:
+    - deploy
+    - compose
+
+- name: "Display Docker Compose output for {{ item }}"
+  debug:
+    msg: "{{ compose_result }}"
+  loop: "{{ compose_apps | default([]) }}"
+  tags:
+    - deploy
+    - compose

@@ -1,0 +1,10 @@
+---
+# Global variables for all hosts
+
+# SSH configuration
+ansible_user: matt
+ansible_become: true
+ansible_become_method: sudo
+
+# System settings
+system_timezone: UTC

@@ -1,0 +1,3 @@
+---
+# Default variables for deploy_compose role
+compose_apps: []

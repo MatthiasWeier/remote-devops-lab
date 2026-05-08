@@ -1,0 +1,47 @@
+---
+# Tasks to setup nginx-proxy-manager
+
+- name: Ensure Docker is installed
+  assert:
+    that:
+      - ansible_facts.packages is defined
+    fail_msg: "Docker must be installed before deploying nginx-proxy-manager"
+  tags:
+    - nginx-proxy
+    - verify
+
+- name: Create nginx-proxy-manager directory
+  file:
+    path: /opt/docker/nginx-proxy-manager
+    state: directory
+    mode: '0755'
+  tags:
+    - nginx-proxy
+    - setup
+
+- name: Synchronize nginx-proxy-manager docker-compose files
+  synchronize:
+    src: "../../docker/nginx-proxy-manager/"
+    dest: "/opt/docker/nginx-proxy-manager/"
+    delete: yes
+    recursive: yes
+  tags:
+    - nginx-proxy
+    - setup
+
+- name: Start nginx-proxy-manager services
+  docker_compose_v2:
+    project_src: /opt/docker/nginx-proxy-manager
+    state: present
+    pull: always
+  register: nginx_proxy_result
+  tags:
+    - nginx-proxy
+    - deploy
+
+- name: Display nginx-proxy-manager status
+  debug:
+    msg: "{{ nginx_proxy_result }}"
+  tags:
+    - nginx-proxy
+    - verify

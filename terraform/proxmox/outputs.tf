@@ -18,3 +18,31 @@ output "vm_ids" {
     for name, vm in module.ubuntu_vm : name => vm.vmid
   }
 }
+
+# Output Ansible inventory file path
+output "ansible_inventory_path" {
+  description = "Path to the generated Ansible inventory file"
+  value       = local_file.ansible_inventory.filename
+}
+
+# Output docker nodes
+output "docker_nodes" {
+  description = "Map of docker nodes with their details"
+  value = {
+    for name, vm in local.docker_nodes : name => {
+      ip_address = vm.ip_address
+      vmid       = vm.vmid
+    }
+  }
+}
+
+# Output proxy nodes
+output "proxy_nodes" {
+  description = "Map of proxy nodes with their details"
+  value = {
+    for name, vm in local.proxy_nodes : name => {
+      ip_address = vm.ip_address
+      vmid       = vm.vmid
+    }
+  }
+}

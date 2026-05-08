@@ -1,0 +1,44 @@
+---
+# Master playbook - orchestrates all infrastructure setup
+
+- name: Deploy entire infrastructure
+  hosts: localhost
+  gather_facts: yes
+  tags:
+    - always
+
+  pre_tasks:
+    - name: Display deployment information
+      debug:
+        msg: |
+          Starting deployment of Remote DevOps Lab
+          Timestamp: {{ ansible_date_time.iso8601 }}
+      tags:
+        - always
+
+- name: Import Docker nodes playbook
+  import_playbook: docker.yml
+  tags:
+    - docker
+    - docker_nodes
+
+- name: Import Proxy nodes playbook
+  import_playbook: proxy.yml
+  tags:
+    - proxy
+    - proxy_nodes
+
+- name: Post-deployment summary
+  hosts: localhost
+  gather_facts: no
+  tags:
+    - always
+
+  tasks:
+    - name: Display deployment completion message
+      debug:
+        msg: |
+          Deployment completed successfully!
+          All infrastructure components have been configured.
+      tags:
+        - always

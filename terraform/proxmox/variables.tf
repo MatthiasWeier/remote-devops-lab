@@ -54,3 +54,9 @@ variable "network_bridge" {
   type        = string
   default     = "vmbr0"
 }
+
+variable "ssh_password" {
+  description = "SSH password for the matt user on VMs"
+  type        = string
+  sensitive   = true
+}

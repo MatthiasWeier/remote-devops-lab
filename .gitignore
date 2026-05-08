@@ -7,3 +7,6 @@
 *.key
 *.lock.info
 .aider*
+ansible/ansible.log
+**/hosts.ini
+*.retry

@@ -1,0 +1,11 @@
+---
+# Variables for proxy_nodes group
+# These hosts will run the reverse proxy (nginx-proxy-manager)
+
+# Docker configuration
+docker_version: latest
+docker_compose_version: latest
+
+# Applications to deploy on proxy nodes
+compose_apps:
+  - reverse-proxy

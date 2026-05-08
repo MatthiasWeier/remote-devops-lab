@@ -1,0 +1,3 @@
+---
+# Default variables for docker_setup role
+docker_version: latest

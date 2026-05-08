@@ -1,0 +1,42 @@
+---
+# Playbook to setup Docker nodes and deploy containerized applications
+
+- name: Configure Docker nodes
+  hosts: docker_nodes
+  become: yes
+  gather_facts: yes
+  tags:
+    - docker
+    - docker_nodes
+
+  pre_tasks:
+    - name: Display target hosts
+      debug:
+        msg: "Configuring Docker on {{ inventory_hostname }}"
+      tags:
+        - always
+
+  roles:
+    - role: docker_setup
+      tags:
+        - docker
+        - docker_setup
+
+    - role: deploy_compose
+      tags:
+        - docker
+        - deploy_compose
+
+  post_tasks:
+    - name: Verify Docker Compose applications are running
+      command: docker ps --format "table {{.Names}}\t{{.Status}}"
+      register: running_containers
+      changed_when: false
+      tags:
+        - verify
+
+    - name: Display running containers
+      debug:
+        msg: "{{ running_containers.stdout_lines }}"
+      tags:
+        - verify
