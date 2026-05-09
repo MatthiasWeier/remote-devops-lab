@@ -1,0 +1,94 @@
+---
+# Tasks for system_setup role - extends disk space and validates system readiness
+
+- name: Install cloud-guest-utils for growpart
+  ansible.builtin.apt:
+    name: cloud-guest-utils
+    state: present
+    update_cache: yes
+
+- name: Get current root partition size
+  ansible.builtin.shell: |
+    lsblk -b -n -o SIZE {{ root_partition }} | tr -d ' '
+  register: root_partition_size_before
+  changed_when: false
+  failed_when: false
+
+- name: Extend root partition with growpart
+  ansible.builtin.shell: |
+    growpart {{ root_partition | regex_replace('[0-9]+$', '') }} {{ root_partition | regex_replace('^.*([0-9]+)$', '\1') }}
+  register: growpart_root_result
+  changed_when: "'CHANGED' in growpart_root_result.stdout"
+  failed_when: 
+    - growpart_root_result.rc != 0
+    - "'NOCHANGE' not in growpart_root_result.stdout"
+
+- name: Get current LVM partition size
+  ansible.builtin.shell: |
+    lsblk -b -n -o SIZE {{ lvm_partition }} | tr -d ' '
+  register: lvm_partition_size_before
+  changed_when: false
+  failed_when: false
+
+- name: Extend LVM partition with growpart
+  ansible.builtin.shell: |
+    growpart {{ lvm_partition | regex_replace('[0-9]+$', '') }} {{ lvm_partition | regex_replace('^.*([0-9]+)$', '\1') }}
+  register: growpart_lvm_result
+  changed_when: "'CHANGED' in growpart_lvm_result.stdout"
+  failed_when:
+    - growpart_lvm_result.rc != 0
+    - "'NOCHANGE' not in growpart_lvm_result.stdout"
+
+- name: Resize physical volume
+  ansible.builtin.shell: |
+    pvresize {{ lvm_partition }}
+  register: pvresize_result
+  changed_when: "'Physical volume' in pvresize_result.stdout"
+  failed_when: false
+
+- name: Extend logical volume to use all free space
+  ansible.builtin.shell: |
+    lvextend -l +100%FREE {{ lvm_root_device }}
+  register: lvextend_result
+  changed_when: "'Extending logical volume' in lvextend_result.stdout"
+  failed_when: false
+
+- name: Resize filesystem
+  ansible.builtin.shell: |
+    resize2fs {{ lvm_root_device }}
+  register: resize2fs_result
+  changed_when: "'Filesystem at' in resize2fs_result.stdout"
+  failed_when: false
+
+- name: Get updated root partition size
+  ansible.builtin.shell: |
+    lsblk -b -n -o SIZE {{ root_partition }} | tr -d ' '
+  register: root_partition_size_after
+  changed_when: false
+
+- name: Display disk expansion summary
+  ansible.builtin.debug:
+    msg: |
+      Disk expansion completed:
+      Root partition before: {{ (root_partition_size_before.stdout | int / 1024 / 1024 / 1024) | round(2) }} GB
+      Root partition after: {{ (root_partition_size_after.stdout | int / 1024 / 1024 / 1024) | round(2) }} GB
+  when: root_partition_size_before.stdout | length > 0
+
+- name: Gather filesystem facts for validation
+  ansible.builtin.setup:
+    gather_subset:
+      - mounts
+
+- name: Pre-flight check - Verify minimum disk space available
+  ansible.builtin.assert:
+    that:
+      - ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_available') | first | int >= min_disk_space_bytes
+    fail_msg: |
+      CRITICAL: Root filesystem does not have minimum required free space!
+      Required: {{ (min_disk_space_bytes / 1024 / 1024 / 1024) | round(2) }} GB
+      Available: {{ (ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_available') | first | int / 1024 / 1024 / 1024) | round(2) }} GB
+      Please manually extend the disk or investigate LVM configuration.
+    success_msg: |
+      SUCCESS: Root filesystem has sufficient free space!
+      Available: {{ (ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_available') | first | int / 1024 / 1024 / 1024) | round(2) }} GB
+      Minimum required: {{ (min_disk_space_bytes / 1024 / 1024 / 1024) | round(2) }} GB

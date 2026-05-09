@@ -10,3 +10,8 @@
 ansible/ansible.log
 **/hosts.ini
 *.retry
+docker/nginx-proxy-manager/docker-compose.yml
+.env
+docker/**/.env
+.vault_pass
+~/.ansible_vault_pw

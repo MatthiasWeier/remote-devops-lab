@@ -20,3 +20,4 @@ networks:
   proxy-tier:
     name: proxy-tier
     driver: bridge
+    external: true

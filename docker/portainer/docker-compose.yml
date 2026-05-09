@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  portainer:
+    image: 'portainer/portainer-ce:latest'
+    container_name: portainer
+    restart: unless-stopped
+    ports:
+      - '8000:8000'  # Portainer edge agent
+      - '9000:9000'  # Portainer web interface
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/data
+    networks:
+      - proxy-tier
+    environment:
+      - INITIAL_ADMIN_PASSWORD=${PORTAINER_ADMIN_PASSWORD}
+
+networks:
+  proxy-tier:
+    name: proxy-tier
+    driver: bridge
+    external: true

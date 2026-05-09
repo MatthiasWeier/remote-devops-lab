@@ -17,19 +17,27 @@
         - always
 
   roles:
+    - role: system_setup
+      tags:
+        - system_setup
+
     - role: docker_setup
       tags:
         - docker
         - docker_setup
 
     - role: deploy_compose
+      vars:
+        compose_apps:
+          - portainer
+          - monitoring
       tags:
         - docker
         - deploy_compose
 
   post_tasks:
     - name: Verify Docker Compose applications are running
-      command: docker ps --format "table {{.Names}}\t{{.Status}}"
+      command: docker ps --format "table {{ '{{' }}.Names{{ '}}' }}\t{{ '{{' }}.Status{{ '}}' }}"
       register: running_containers
       changed_when: false
       tags:

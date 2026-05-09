@@ -20,6 +20,67 @@
     - deploy
     - compose
 
+- name: Create Docker network proxy-tier
+  ansible.builtin.shell: docker network create proxy-tier || true
+  register: network_create_result
+  changed_when: "'Created network' in network_create_result.stdout"
+  tags:
+    - deploy
+    - compose
+
+- name: "Create .env file for {{ item }}"
+  ansible.builtin.copy:
+    dest: "/opt/docker/{{ item }}/.env"
+    content: |
+      {% if item == 'portainer' %}
+      PORTAINER_ADMIN_PASSWORD={{ vault_portainer_admin_password }}
+      {% elif item == 'monitoring' %}
+      GRAFANA_ADMIN_PASSWORD={{ vault_grafana_admin_password }}
+      {% endif %}
+    mode: '0600'
+  loop: "{{ compose_apps | default([]) }}"
+  when: item in ['portainer', 'monitoring']
+  tags:
+    - deploy
+    - compose
+
+- name: "Clean up incorrectly created prometheus.yml directory for monitoring"
+  file:
+    path: "/opt/docker/{{ item }}/prometheus.yml"
+    state: absent
+  loop: "{{ compose_apps | default([]) }}"
+  when: item == 'monitoring'
+  ignore_errors: yes
+  tags:
+    - deploy
+    - compose
+
+- name: "Create Prometheus data directory for monitoring"
+  file:
+    path: "/opt/docker/monitoring/data"
+    state: directory
+    mode: '0755'
+    owner: '65534'
+    group: '65534'
+    recurse: yes
+  when: "'monitoring' in (compose_apps | default([]))"
+  tags:
+    - deploy
+    - compose
+
+- name: "Create Grafana storage directory for monitoring"
+  file:
+    path: "/opt/docker/monitoring/grafana-storage"
+    state: directory
+    mode: '0755'
+    owner: '472'
+    group: '472'
+    recurse: yes
+  when: "'monitoring' in (compose_apps | default([]))"
+  tags:
+    - deploy
+    - compose
+
 - name: "Synchronize docker-compose files for {{ item }}"
   synchronize:
     src: "../../docker/{{ item }}/"

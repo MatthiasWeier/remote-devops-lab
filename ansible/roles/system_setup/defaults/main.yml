@@ -1,0 +1,10 @@
+---
+# Default variables for system_setup role
+
+# Minimum required free disk space in bytes (10 GB)
+min_disk_space_bytes: 10737418240
+
+# Partition and LVM configuration
+root_partition: "/dev/sda2"
+lvm_partition: "/dev/sda5"
+lvm_root_device: "/dev/mapper/debian--vg-root"

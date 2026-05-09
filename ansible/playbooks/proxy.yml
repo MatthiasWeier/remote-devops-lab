@@ -17,19 +17,26 @@
         - always
 
   roles:
+    - role: system_setup
+      tags:
+        - system_setup
+
     - role: docker_setup
       tags:
         - docker
         - docker_setup
 
     - role: deploy_compose
+      vars:
+        compose_apps:
+          - nginx-proxy-manager
       tags:
         - docker
         - deploy_compose
 
   post_tasks:
     - name: Verify reverse proxy is running
-      command: docker ps --filter "name=nginx-proxy" --format "table {{.Names}}\t{{.Status}}"
+      command: docker ps --filter "name=nginx-proxy" --format "table {{ '{{' }}.Names{{ '}}' }}\t{{ '{{' }}.Status{{ '}}' }}"
       register: proxy_status
       changed_when: false
       tags:

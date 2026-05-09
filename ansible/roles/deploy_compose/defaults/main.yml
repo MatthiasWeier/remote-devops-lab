@@ -1,3 +1,9 @@
 ---
 # Default variables for deploy_compose role
+# This list can be overridden in playbooks or host_vars
 compose_apps: []
+
+# Default credentials for Docker applications
+# NOTE: Real values are stored in ansible/group_vars/all/vault.yml (encrypted with Ansible Vault)
+portainer_admin_password: "PLACEHOLDER_IN_VAULT"
+grafana_admin_password: "PLACEHOLDER_IN_VAULT"
