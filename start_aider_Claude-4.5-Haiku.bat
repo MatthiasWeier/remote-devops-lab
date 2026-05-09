@@ -1,7 +1,7 @@
 @echo off
-title Aider Agent - Claude 3.5 Sonnet
+title Aider Agent - claude-haiku-4-5
 echo ===================================================
-echo Starte Aider mit Claude 3.5 Sonnet...
+echo Starte Aider mit claude-haiku-4-5...
 echo ===================================================
 
 :: Hier starten wir Aider mit Claude und deaktivieren die Auto-Commits
