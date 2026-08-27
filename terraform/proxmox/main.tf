@@ -29,7 +29,11 @@ module "ubuntu_vm" {
   gateway        = each.value.gateway
 
   # Cloud-Init settings
-  ssh_keys = [file(var.ssh_public_key_path)]
+  # trimspace() avoids a spurious "forces replacement" diff on every future
+  # plan/apply if the key file's trailing newline ever differs from what's
+  # in state - file() reads bytes exactly, and a stray newline is otherwise
+  # invisible but reads as a changed key to Terraform.
+  ssh_keys = [trimspace(file(var.ssh_public_key_path))]
 }
 
 # Split K3s nodes into control_plane and workers by their explicit role

@@ -25,13 +25,13 @@ spec:
         # If you're targeting an older Immich release that still needs
         # Typesense, this manifest doesn't cover that.
         #
-        # NOTE: `existingSecret: immich-postgres-secret` below is
-        # intentional - no DB password is committed to git. Create it
-        # once, manually, before the first sync:
+        # NOTE: `immich-postgres-secret` (keys: password, DB_PASSWORD) is
+        # intentional - no DB password is committed to git. Create it once,
+        # manually, before the first sync:
         #   kubectl create namespace immich
         #   kubectl create secret generic immich-postgres-secret -n immich \
-        #     --from-literal=postgres-password=<random> \
-        #     --from-literal=password=<random>
+        #     --from-literal=password=<random> \
+        #     --from-literal=DB_PASSWORD=<same random value>
         # (This is exactly the gap Phase 6 of the root README flags under
         # "GitOps Secrets Management" - a real Sealed Secrets / External
         # Secrets setup would remove this manual step.)
@@ -41,7 +41,24 @@ spec:
         # --version <targetRevision>` before first apply and adjust key
         # names if they've drifted.
 
+        # Postgres: the chart's bundled `postgresql` subchart hard-fails to
+        # render (not just deprecated). Redis: the bundled `redis` subchart
+        # pulls a Bitnami image tag Docker Hub no longer serves (Bitnami
+        # pulled many free tags in 2025 moving to a paid model). Both
+        # replaced with standalone deployments - see
+        # kubernetes/apps/immich-postgres.yaml (covers both despite the
+        # name) - and the shared env block below points at them instead.
+        # DB_PASSWORD comes in via envFrom below, not inlined here.
+        env:
+          DB_HOSTNAME: immich-postgres
+          DB_USERNAME: immich
+          DB_DATABASE_NAME: immich
+          REDIS_HOSTNAME: immich-redis
+
         server:
+          envFrom:
+            - secretRef:
+                name: immich-postgres-secret
           ingress:
             main:
               enabled: true
@@ -49,56 +66,44 @@ spec:
               annotations:
                 cert-manager.io/cluster-issuer: letsencrypt-prod
               hosts:
-                - host: photos.example.com # TODO: real domain
+                - host: cloud.matt-host.de
                   paths:
                     - path: /
                       pathType: Prefix
               tls:
                 - secretName: immich-tls
                   hosts:
-                    - photos.example.com # TODO: real domain
+                    - cloud.matt-host.de
 
+        # The chart does NOT auto-create the library volume - "existingClaim"
+        # is the only supported option (confirmed via `helm show values`).
+        # Create the PVC once, out of band, before first sync:
+        #   kubectl create namespace immich
+        #   kubectl apply -f - <<'EOF'
+        #   apiVersion: v1
+        #   kind: PersistentVolumeClaim
+        #   metadata:
+        #     name: immich-library
+        #     namespace: immich
+        #   spec:
+        #     accessModes: ["ReadWriteOnce"]
+        #     storageClassName: longhorn
+        #     resources:
+        #       requests:
+        #         storage: 200Gi
+        #   EOF
+        immich:
           persistence:
             library:
-              enabled: true
-              storageClass: longhorn
-              size: 200Gi
-              accessMode: ReadWriteOnce
+              existingClaim: immich-library
 
         machine-learning:
           persistence:
             cache:
               enabled: true
+              type: pvc
               storageClass: longhorn
               size: 20Gi
-
-        # Bundled Postgres - overridden to a pgvector-capable image, since
-        # Immich requires the vector extension and plain postgres images
-        # don't have it.
-        postgresql:
-          enabled: true
-          image:
-            repository: tensorchord/pgvecto-rs
-            tag: pg14-v0.2.0
-          global:
-            postgresql:
-              auth:
-                username: immich
-                database: immich
-                existingSecret: immich-postgres-secret
-          primary:
-            persistence:
-              enabled: true
-              storageClass: longhorn
-              size: 50Gi
-
-        redis:
-          enabled: true
-          master:
-            persistence:
-              enabled: true
-              storageClass: longhorn
-              size: 5Gi
 
   destination:
     server: https://kubernetes.default.svc

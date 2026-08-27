@@ -1,0 +1,29 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: immich-postgres
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  # Raw Kubernetes manifests - see kubernetes/apps/manifests/immich-postgres/.
+  # Standalone Postgres (pgvector-capable) because the immich chart's bundled
+  # postgresql subchart is hard-deprecated and fails to render. See the
+  # comment at the top of manifests/immich-postgres/postgres.yaml.
+  source:
+    repoURL: https://github.com/MatthiasWeier/remote-devops-lab.git
+    targetRevision: main
+    path: kubernetes/apps/manifests/immich-postgres
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: immich
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

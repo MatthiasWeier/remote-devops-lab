@@ -1,0 +1,44 @@
+# Standalone Redis for Immich (in this same "immich-postgres" Application/
+# directory despite the name - it's really "immich's non-Helm-managed
+# dependencies"). The chart's bundled `redis` subchart pulls a Bitnami
+# image tag (bitnami/redis:7.2.5-debian-12-r0) that Docker Hub no longer
+# serves - Bitnami pulled many free-tier tags in 2025 as part of moving to
+# a paid "Secure Images" model, which broke this and plenty of other charts
+# pinned to older Bitnami tags. Using the plain official redis image instead
+# sidesteps that churn entirely.
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: immich-redis
+  namespace: immich
+spec:
+  serviceName: immich-redis
+  replicas: 1
+  selector:
+    matchLabels:
+      app: immich-redis
+  template:
+    metadata:
+      labels:
+        app: immich-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-redis
+  namespace: immich
+spec:
+  selector:
+    app: immich-redis
+  ports:
+    - port: 6379
+      targetPort: 6379

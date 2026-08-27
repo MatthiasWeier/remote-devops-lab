@@ -1,14 +1,55 @@
 ---
-# Prepares K3s worker nodes for Longhorn distributed block storage:
-# installs iSCSI/NFS prerequisites and formats + mounts the secondary
-# Terraform-provisioned disk (scsi1) at /var/lib/longhorn.
+# Prepares the K3s cluster for Longhorn distributed block storage.
 #
-# Only targets `workers` because control-plane nodes are not given a
-# secondary_disk_size in terraform.tfvars - see terraform/proxmox/README.md.
-# If you later schedule workloads on the control-plane too, give it a
-# secondary_disk_size in Terraform first, then add it to this play's hosts.
+# Two plays, deliberately different scopes:
+#   1. iSCSI/NFS OS prerequisites - ALL cluster nodes (k3s_cluster). Longhorn's
+#      manager runs as a DaemonSet on every node, including the control-plane,
+#      and requires iscsiadm to even start there - even though the
+#      control-plane holds no Longhorn disk itself. Confirmed the hard way:
+#      omitting the control-plane here crashes longhorn-manager with
+#      "failed to check environment, please make sure you have iscsiadm/
+#      open-iscsi installed on the host".
+#   2. Format + mount the secondary Terraform-provisioned disk (scsi1) at
+#      /var/lib/longhorn - workers only, since only workers are given a
+#      secondary_disk_size in terraform.tfvars (see terraform/proxmox/README.md).
 
-- name: Prepare nodes for Longhorn storage
+- name: Install Longhorn OS prerequisites on all cluster nodes
+  hosts: k3s_cluster
+  become: yes
+  gather_facts: yes
+  tags:
+    - longhorn
+    - longhorn_nodes
+
+  tasks:
+    - name: Display target hosts
+      debug:
+        msg: "Installing Longhorn OS prerequisites on {{ inventory_hostname }}"
+      tags:
+        - always
+
+    - name: Install Longhorn OS prerequisites
+      apt:
+        name:
+          - open-iscsi
+          - nfs-common
+          - util-linux
+        state: present
+        update_cache: yes
+      tags:
+        - longhorn
+        - packages
+
+    - name: Ensure iscsid service is enabled and started
+      systemd:
+        name: iscsid
+        state: started
+        enabled: yes
+      tags:
+        - longhorn
+        - services
+
+- name: Format and mount Longhorn storage disk on workers
   hosts: workers
   become: yes
   gather_facts: yes
@@ -20,12 +61,6 @@
     - longhorn_nodes
 
   pre_tasks:
-    - name: Display target hosts
-      debug:
-        msg: "Preparing {{ inventory_hostname }} for Longhorn storage"
-      tags:
-        - always
-
     # Device naming (sda/sdb/...) for the scsi0 (root) vs scsi1 (Longhorn)
     # disks is NOT guaranteed by kernel/boot order - confirmed the hard way:
     # on one node the blank Longhorn disk came up as /dev/sda while the
@@ -67,27 +102,6 @@
         - always
 
   tasks:
-    - name: Install Longhorn OS prerequisites
-      apt:
-        name:
-          - open-iscsi
-          - nfs-common
-          - util-linux
-        state: present
-        update_cache: yes
-      tags:
-        - longhorn
-        - packages
-
-    - name: Ensure iscsid service is enabled and started
-      systemd:
-        name: iscsid
-        state: started
-        enabled: yes
-      tags:
-        - longhorn
-        - services
-
     - name: Check for an existing filesystem on the secondary disk
       command: "blkid -o value -s TYPE {{ longhorn_data_disk }}"
       register: longhorn_disk_fstype

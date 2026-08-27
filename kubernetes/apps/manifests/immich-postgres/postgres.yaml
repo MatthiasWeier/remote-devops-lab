@@ -1,0 +1,96 @@
+# Standalone Postgres for Immich, deployed outside the immich Helm chart.
+#
+# The immich-charts chart's bundled `postgresql` subchart is hard-deprecated:
+# setting `postgresql.enabled: true` makes the chart's own checks.yaml
+# template fail to render at all (not just a warning). See
+# https://github.com/immich-app/immich-charts/issues/149. Immich requires
+# the pgvector/pgvecto-rs extension, which plain postgres images don't have,
+# so this uses the same tensorchord/pgvecto-rs image the deprecated subchart
+# used, with the required extensions created via an init script.
+#
+# Expects `immich-postgres-secret` to already exist in the immich namespace
+# with a `password` key (created manually, see immich.yaml's comments).
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: immich-postgres-init
+  namespace: immich
+data:
+  init.sql: |
+    CREATE EXTENSION IF NOT EXISTS cube;
+    CREATE EXTENSION IF NOT EXISTS earthdistance;
+    CREATE EXTENSION IF NOT EXISTS vectors;
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-postgres-data
+  namespace: immich
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: immich-postgres
+  namespace: immich
+spec:
+  serviceName: immich-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: immich-postgres
+  template:
+    metadata:
+      labels:
+        app: immich-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: tensorchord/pgvecto-rs:pg14-v0.2.0
+          env:
+            - name: POSTGRES_DB
+              value: immich
+            - name: POSTGRES_USER
+              value: immich
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: immich-postgres-secret
+                  key: password
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+              subPath: postgres
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: immich-postgres-data
+        - name: init
+          configMap:
+            name: immich-postgres-init
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-postgres
+  namespace: immich
+spec:
+  selector:
+    app: immich-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432

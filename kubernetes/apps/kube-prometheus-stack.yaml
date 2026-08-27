@@ -17,6 +17,17 @@ spec:
     #   helm search repo prometheus-community/kube-prometheus-stack --versions
     targetRevision: 65.5.1
     helm:
+      # This chart's CRDs (prometheuses, alertmanagers, etc.) are large enough
+      # to hit Kubernetes' 256KiB metadata.annotations limit. Neither a plain
+      # sync nor `syncOptions: [ServerSideApply=true]` at the Application
+      # level reliably avoids this for CRDs shipped in Helm's special crds/
+      # folder (confirmed empirically - both still failed with the same
+      # "Too long" error). Skip CRD management here entirely and install
+      # them once, out of band, matching this exact targetRevision:
+      #   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+      #   helm show crds prometheus-community/kube-prometheus-stack --version 65.5.1 \
+      #     | kubectl apply --server-side -f -
+      skipCrds: true
       values: |
         prometheus:
           prometheusSpec:
@@ -49,6 +60,18 @@ spec:
             accessModes:
               - ReadWriteOnce
             size: 10Gi
+          ingress:
+            enabled: true
+            ingressClassName: traefik
+            annotations:
+              cert-manager.io/cluster-issuer: letsencrypt-prod
+            hosts:
+              - grafana.matt-host.de
+            path: /
+            tls:
+              - secretName: grafana-tls
+                hosts:
+                  - grafana.matt-host.de
 
   destination:
     server: https://kubernetes.default.svc
@@ -60,3 +83,9 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      # This chart's CRDs (prometheuses, alertmanagers, etc.) have large
+      # enough OpenAPI schemas to exceed Kubernetes' 256KiB annotation limit
+      # under ArgoCD's default client-side-apply-style sync, the same issue
+      # hit bootstrapping ArgoCD itself (see kubernetes/bootstrap/install-argocd.sh).
+      # Server-side apply avoids writing that annotation at all.
+      - ServerSideApply=true

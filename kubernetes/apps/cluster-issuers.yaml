@@ -6,6 +6,10 @@
 # (Same first-run pattern as kubernetes/apps/kube-prometheus-stack.yaml -
 # see the root README's Phase 6 "App-of-Apps" item for why this manual step
 # still exists.)
+#
+# Requires port 80 (HTTP-01 challenge) and 443 forwarded from your router to
+# a K3s node - Traefik listens on both via K3s's built-in LoadBalancer/
+# klipper-lb on every node's host IP.
 
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -14,9 +18,7 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    # TODO: set a real, monitored mailbox - Let's Encrypt sends renewal/
-    # expiry and policy notices here. Do not leave this placeholder.
-    email: "CHANGE-ME@example.com"
+    email: "matti.wei@web.de"
     privateKeySecretRef:
       name: letsencrypt-prod-account-key
     solvers:

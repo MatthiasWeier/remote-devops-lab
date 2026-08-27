@@ -117,7 +117,7 @@ ssh matt@<control-plane-ip> 'sudo kubectl get nodes'
 ansible-playbook -i inventories/production/hosts.ini playbooks/setup-longhorn-nodes.yml
 ```
 
-Installs `open-iscsi`/`nfs-common`, formats the secondary disk `ext4`, mounts it at `/var/lib/longhorn`. The disk is identified **structurally** (the one block device with no partition table), not by a hardcoded device name — see [why](#bugs-hit-and-fixed) below.
+Two plays: iSCSI/NFS OS prerequisites go on **every** cluster node (`k3s_cluster`) including the control-plane - Longhorn's manager DaemonSet needs `iscsiadm` there too even though it holds no disk, see [bug 10](#bugs-hit-and-fixed) below. Only then does the second play format the secondary disk `ext4` and mount it at `/var/lib/longhorn` on the workers. The disk is identified **structurally** (the one block device with no partition table), not by a hardcoded device name — see [bug 5](#bugs-hit-and-fixed) below.
 
 ### 7. Bootstrap ArgoCD
 
@@ -137,20 +137,54 @@ kubectl create namespace longhorn-system
 helm install longhorn longhorn/longhorn \
   --namespace longhorn-system \
   --set defaultSettings.defaultDataPath="/var/lib/longhorn" \
-  --set defaultSettings.createDefaultDiskLabeledNodes=true
+  --set defaultSettings.createDefaultDiskLabeledNodes=true \
+  --set persistence.defaultClassReplicaCount=<number of worker/storage nodes>
 kubectl label nodes <worker-1> <worker-2> node.longhorn.io/create-default-disk=true
+```
+
+Set `persistence.defaultClassReplicaCount` to however many nodes actually have a Longhorn disk (2 in this build) - the chart's own default is 3, which silently deadlocks every volume if you have fewer storage nodes than that. See [bug 12](#bugs-hit-and-fixed) below.
+
+Also reduce each disk's reserved buffer - Longhorn reserves ~30% of a disk by default, sized for disks *shared* with other workloads. Ours are 100% dedicated to Longhorn, so that reservation just wastes capacity and can block volumes from scheduling at all (see [bug 13](#bugs-hit-and-fixed)):
+
+```bash
+for n in <worker-1> <worker-2>; do
+  disk=$(kubectl -n longhorn-system get nodes.longhorn.io "$n" -o jsonpath='{.spec.disks}' | python3 -c "import json,sys; print(list(json.load(sys.stdin).keys())[0])")
+  kubectl -n longhorn-system patch nodes.longhorn.io "$n" --type=merge \
+    -p "{\"spec\":{\"disks\":{\"$disk\":{\"storageReserved\":2147483648}}}}"   # 2GiB
+done
+```
+
+```bash
+# kube-prometheus-stack's CRDs live in Helm's special crds/ folder, which
+# ArgoCD does not reliably manage even with ServerSideApply=true (see bug
+# 11) - kubernetes/apps/kube-prometheus-stack.yaml already sets
+# source.helm.skipCrds: true to opt out of ArgoCD managing them, so install
+# them once yourself, version-matched to the pinned chart revision:
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+helm show crds prometheus-community/kube-prometheus-stack --version 65.5.1 \
+  | kubectl apply --server-side -f -
 
 # ArgoCD apps - first sync of each is a manual kubectl apply (no App-of-Apps yet)
 kubectl apply -f kubernetes/apps/kube-prometheus-stack.yaml
 kubectl apply -f kubernetes/apps/cert-manager.yaml
 # wait for cert-manager to be Ready, THEN:
 kubectl apply -f kubernetes/apps/cluster-issuers.yaml   # edit the email placeholder first
-kubectl apply -f kubernetes/apps/immich.yaml             # edit domain + create the postgres secret first
+kubectl apply -f kubernetes/apps/immich-postgres.yaml     # standalone Postgres+Redis - see bugs 17/18 below
+kubectl apply -f kubernetes/apps/immich.yaml               # edit domain + create the postgres secret first
 kubectl apply -f kubernetes/apps/tandoor.yaml
 kubectl apply -f kubernetes/apps/bookstack.yaml
 ```
 
 Every one of these `.yaml` files has `TODO`-flagged placeholders (domains, the Let's Encrypt contact email, database secrets) — check each file before applying.
+
+Access Grafana without any ingress/TLS setup at all, straight over a port-forward:
+
+```bash
+kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80 -n monitoring
+# http://localhost:3000, user: admin, password:
+kubectl -n monitoring get secret kube-prometheus-stack-grafana -o jsonpath='{.data.admin-password}' | base64 -d
+```
 
 ---
 
@@ -194,6 +228,47 @@ Documented in detail because they're the actual engineering content of this buil
 ### 9. Re-running the (now server-side) apply hits field-manager conflicts
 **Cause:** the first, partially-failed run had already created most objects via client-side apply, registering `kubectl-client-side-apply` as their field manager. The second, server-side run then conflicted with that ownership on fields already set.
 **Fix:** added `--force-conflicts` — safe here since nothing else manages these fields; documented in the [Kubernetes server-side apply docs](https://kubernetes.io/docs/reference/using-api/server-side-apply/#conflicts).
+
+### 10. `longhorn-manager` CrashLoopBackOff on the control-plane
+**Cause:** Longhorn's manager runs as a DaemonSet on *every* cluster node, including the control-plane - even though the control-plane holds no Longhorn disk by design (see Terraform's `secondary_disk_size`, worker-only). `setup-longhorn-nodes.yml` originally only targeted `workers`, so the control-plane never got `open-iscsi` installed. The manager's own startup check fails hard without it: `Error starting manager: failed to check environment, please make sure you have iscsiadm/open-iscsi installed on the host`.
+**Fix:** split the playbook into two plays - iSCSI/NFS OS prerequisites now run against `k3s_cluster` (all nodes), while the disk format/mount logic stays `workers`-only.
+
+### 11. ArgoCD sync fails on kube-prometheus-stack: same CRD-annotation-size problem, in a new place
+**Cause:** ArgoCD's Helm rendering *does* attempt to apply CRDs from a chart's special `crds/` folder (it isn't skipped outright), but does so in a way that hits the identical 256KiB annotation limit from bug 8/9 - and unlike ArgoCD's own bootstrap, setting `syncOptions: [ServerSideApply=true]` at the Application level did **not** fix it here; the same "Too long" error kept recurring across multiple sync retries.
+**Fix:** `source.helm.skipCrds: true` on the Application, so ArgoCD doesn't touch these CRDs at all - install them once yourself, version-matched to the pinned chart revision: `helm show crds prometheus-community/kube-prometheus-stack --version <rev> | kubectl apply --server-side -f -`. After changing this on an Application that's already stuck retrying, a `kubectl delete -f` + `kubectl apply -f` (full recreate) was needed - a `refresh=hard` annotation and even clearing `status.operationState` were not enough to unstick the retry loop.
+
+### 12. Prometheus/Alertmanager/Grafana volumes stuck `degraded`/`faulted`: replica count vs. actual storage nodes
+**Cause:** the `longhorn` StorageClass's chart default is `numberOfReplicas: "3"`, but only 2 nodes in this cluster actually have a Longhorn disk (the control-plane deliberately has none). A 3rd replica can never be scheduled, so every volume sits permanently `degraded` - or, if it never got even one replica placed before something else went wrong, `faulted` and stuck `detached`.
+**Fix:** `helm upgrade longhorn longhorn/longhorn --reuse-values --set persistence.defaultClassReplicaCount=2` fixes it for *new* volumes (`StorageClass.parameters` is immutable, so this recreates the class rather than patching it). Volumes already created against the old 3-replica class needed a direct, live patch - Longhorn supports changing replica count on an existing volume without recreating it: `kubectl -n longhorn-system patch volumes.longhorn.io <name> --type=merge -p '{"spec":{"numberOfReplicas":2}}'`.
+
+### 13. A volume still won't schedule even at the correct replica count: `insufficient storage`
+**Cause:** Longhorn reserves roughly 30% of every disk as unusable buffer by default (`storageReserved` on the node's disk spec) - sensible on a disk shared with other workloads, but our secondary disk exists *solely* for Longhorn. After Grafana's and Alertmanager's replicas were already scheduled, the remaining "usable" space (post-reservation) on a 50GB disk was just under Prometheus's 20Gi request.
+**Fix:** reduced the reservation to a flat 2GiB per disk: `kubectl -n longhorn-system patch nodes.longhorn.io <node> --type=merge -p '{"spec":{"disks":{"<disk-name>":{"storageReserved":2147483648}}}}'`.
+
+### 14. Deleting and recreating a stuck PVC deadlocks with itself
+**Cause:** while recovering from bug 12/13, a faulted Prometheus PVC was deleted so the StatefulSet would recreate it fresh. Kubernetes' built-in `kubernetes.io/pvc-protection` finalizer blocks a PVC's deletion until no Pod references it - but the StatefulSet immediately created a *new* pod requesting a PVC with the exact same name, which then itself became the reference blocking the old PVC's finalizer from clearing. Neither side could proceed.
+**Fix:** delete the new pod too (`--force --grace-period=0`) to drop the reference, let the finalizer clear and the old PVC fully disappear, and only then does the StatefulSet's next pod get a genuinely new PVC bound against the (by-then-corrected) StorageClass.
+
+### 15. A routine memory bump plans to destroy and recreate all 3 VMs
+**Cause:** `ssh_keys = [file(var.ssh_public_key_path)]` in `main.tf` reads the key file byte-for-byte. At some point the file's trailing newline no longer matched what was captured in state, and `user_account.keys` is only appliable at clone time - so Terraform planned a full destroy+recreate of every VM (including their Longhorn disks) just to change a value that looked character-for-character identical when printed.
+**Fix:** wrap it in `trimspace()`: `ssh_keys = [trimspace(file(var.ssh_public_key_path))]`. This was latent and would have bitten the *next* `terraform apply` regardless of what it changed - not specific to the memory change that surfaced it.
+
+### 16. Resizing a live-attached disk reshuffles device names mid-session
+**Cause:** growing a worker's secondary disk via `terraform apply` (`secondary_disk_size: 50 -> 500`) caused the guest kernel to re-enumerate its SCSI devices on that one worker - `/dev/sda` and `/dev/sdb` swapped roles between the disk being resized and the (unrelated) root disk, *while the system stayed running*. This is the same non-deterministic-naming issue as bug 5, but this time triggered by a live hardware change instead of a boot, and `/etc/fstab` (written with a device path, not a UUID) silently mounted nothing at `/var/lib/longhorn` on restart of the mount (`nofail` swallows the error).
+**What happened:** Longhorn's own UUID check caught it - `record diskUUID doesn't match the one on the disk` - and marked the disk `Ready: False` rather than accepting the wrong filesystem. Several volumes went `degraded` (one remaining good replica) until the disk was fixed and Longhorn rebuilt the missing replica.
+**Fix:** stop using device paths in `/etc/fstab` entirely. Resolve the filesystem's UUID (`blkid -s UUID -o value /dev/sdX`) and mount by `UUID=...` instead, on both workers - immune to enumeration order changing again for any reason.
+
+### 17. Immich's bundled Postgres subchart doesn't just warn, it refuses to render
+**Cause:** `postgresql.enabled: true` on the immich-charts chart is deprecated - but unlike a normal deprecation, the chart's `checks.yaml` template contains a hard `fail`, so `helm template` errors out completely (ArgoCD shows `ComparisonError`, not a warning) the moment that flag is set. See [immich-charts#149](https://github.com/immich-app/immich-charts/issues/149).
+**Fix:** `postgresql.enabled` left at its default (`false`, i.e. the whole `postgresql:` block removed from values), and a standalone Postgres deployed instead - same `tensorchord/pgvecto-rs` pgvector-capable image the deprecated subchart used, as plain `StatefulSet` + `PVC` + `Service` manifests (`kubernetes/apps/manifests/immich-postgres/postgres.yaml`), with the required `cube`/`earthdistance`/`vectors` extensions created via a mounted `/docker-entrypoint-initdb.d` init script. Immich's shared `env.DB_HOSTNAME` etc. point at it; `DB_PASSWORD` arrives via `server.envFrom.secretRef` rather than being inlined in values.
+
+### 18. Immich's bundled Redis subchart: image tag doesn't exist
+**Cause:** the chart's `redis` subchart pulls `docker.io/bitnami/redis:7.2.5-debian-12-r0`, which Docker Hub returns `not found` for - Bitnami removed a large number of free-tier image tags in 2025 while moving to a paid "Secure Images" model. This breaks any chart still pinned to an affected tag, not something specific to this repo.
+**Fix:** same pattern as Postgres - `redis.enabled` left at its default `false`, and a plain `redis:7-alpine` `StatefulSet` + `Service` deployed standalone (same manifests directory as the Postgres fix above), with `env.REDIS_HOSTNAME` pointed at it.
+
+### 19. A GitOps Application can reference files that were never pushed
+**Cause:** `kubernetes/apps/immich-postgres.yaml` was created and applied locally, but its `source.repoURL` points at GitHub, not the local filesystem - ArgoCD's own copy of the repo didn't have the new `manifests/immich-postgres/` directory yet, so the Application sat in `Unknown` sync status with `app path does not exist` until the commit was actually pushed.
+**Not really a bug** - a reminder that with a git-hosted `source`, "I wrote the file" and "ArgoCD can see the file" are two different things. `kubectl apply`-ing an Application manifest only registers *that ArgoCD should watch a path* - it doesn't substitute for pushing what's supposed to be at that path.
 
 ---
 
