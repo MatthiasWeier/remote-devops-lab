@@ -48,17 +48,29 @@ spec:
         # replaced with standalone deployments - see
         # kubernetes/apps/immich-postgres.yaml (covers both despite the
         # name) - and the shared env block below points at them instead.
-        # DB_PASSWORD comes in via envFrom below, not inlined here.
+        #
+        # DB_PASSWORD must be set HERE, not via server.envFrom: the chart's
+        # own default values.yaml already defines `env.DB_PASSWORD` (as a
+        # template pulling the now-unused postgresql.global.postgresql.auth
+        # .password, which itself defaults to the literal string "immich").
+        # A plain container env entry always wins over envFrom for the same
+        # key, so envFrom here silently lost to that baked-in placeholder -
+        # confirmed the hard way via `kubectl get pod -o jsonpath` showing
+        # DB_PASSWORD: "immich" in the rendered pod despite envFrom being
+        # set. Overriding the same `env.DB_PASSWORD` values path replaces
+        # the chart's default outright instead of losing a merge fight.
         env:
           DB_HOSTNAME: immich-postgres
           DB_USERNAME: immich
           DB_DATABASE_NAME: immich
+          DB_PASSWORD:
+            valueFrom:
+              secretKeyRef:
+                name: immich-postgres-secret
+                key: password
           REDIS_HOSTNAME: immich-redis
 
         server:
-          envFrom:
-            - secretRef:
-                name: immich-postgres-secret
           ingress:
             main:
               enabled: true

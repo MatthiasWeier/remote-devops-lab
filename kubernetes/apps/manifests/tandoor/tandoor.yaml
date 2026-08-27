@@ -117,6 +117,13 @@ metadata:
   namespace: tandoor
 spec:
   replicas: 1
+  # Default RollingUpdate tries to start the new pod before killing the old
+  # one - impossible here since tandoor-media/tandoor-static are
+  # ReadWriteOnce and a single-replica Deployment has no second node to
+  # share them with, so every rollout deadlocks on a Multi-Attach error
+  # until the old pod is manually deleted. Recreate avoids that entirely.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: tandoor

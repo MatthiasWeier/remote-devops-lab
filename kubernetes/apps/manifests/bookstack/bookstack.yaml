@@ -105,6 +105,10 @@ metadata:
   namespace: bookstack
 spec:
   replicas: 1
+  # See the same comment in manifests/tandoor/tandoor.yaml - bookstack-uploads
+  # is ReadWriteOnce, single replica, RollingUpdate would deadlock on rollout.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: bookstack
