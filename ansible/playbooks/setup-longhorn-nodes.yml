@@ -15,11 +15,6 @@
   vars:
     longhorn_mount_path: /var/lib/longhorn
     longhorn_filesystem: ext4
-    # Must correspond to the scsi1 disk size set via `secondary_disk_size`
-    # in terraform.tfvars. Device naming for a freshly cloned VM is sda=scsi0,
-    # sdb=scsi1, but this is not a hard guarantee - the pre_tasks check below
-    # fails loudly instead of silently formatting the wrong disk.
-    longhorn_data_disk: /dev/sdb
   tags:
     - longhorn
     - longhorn_nodes
@@ -31,22 +26,43 @@
       tags:
         - always
 
-    - name: Verify secondary data disk exists
-      stat:
-        path: "{{ longhorn_data_disk }}"
-      register: longhorn_disk_stat
+    # Device naming (sda/sdb/...) for the scsi0 (root) vs scsi1 (Longhorn)
+    # disks is NOT guaranteed by kernel/boot order - confirmed the hard way:
+    # on one node the blank Longhorn disk came up as /dev/sda while the
+    # cloned, partitioned, mounted root disk came up as /dev/sdb. Hardcoding
+    # a device name risks running mkfs on the running root filesystem.
+    #
+    # Instead, identify the Longhorn disk structurally: it is the only sdX
+    # block device with an EMPTY partition table. The cloned root disk
+    # always has partitions (from the Cloud-Init template); a fresh
+    # Terraform-attached data disk never does.
+    - name: Find candidate unpartitioned secondary disks
+      set_fact:
+        longhorn_disk_candidates: "{{ ansible_devices | dict2items | selectattr('key', 'match', '^sd[a-z]+$') | selectattr('value.partitions', 'equalto', {}) | map(attribute='key') | list }}"
       tags:
         - always
 
-    - name: Fail if secondary data disk is missing
+    - name: Fail if the Longhorn disk can't be uniquely identified
       assert:
         that:
-          - longhorn_disk_stat.stat.exists
-          - longhorn_disk_stat.stat.isblk
+          - longhorn_disk_candidates | length == 1
         fail_msg: >
-          {{ longhorn_data_disk }} was not found on {{ inventory_hostname }}.
-          Confirm `secondary_disk_size` is set for this node in terraform.tfvars
-          and that `terraform apply` has been run.
+          Expected exactly one unpartitioned secondary disk on {{ inventory_hostname }},
+          found: {{ longhorn_disk_candidates }}. Refusing to guess which one is safe to
+          format - confirm `secondary_disk_size` is set for this node in terraform.tfvars
+          and that `terraform apply` has been run, then investigate manually.
+      tags:
+        - always
+
+    - name: Set the Longhorn data disk device
+      set_fact:
+        longhorn_data_disk: "/dev/{{ longhorn_disk_candidates[0] }}"
+      tags:
+        - always
+
+    - name: Display identified Longhorn disk
+      debug:
+        msg: "{{ inventory_hostname }}: using {{ longhorn_data_disk }} for Longhorn storage"
       tags:
         - always
 

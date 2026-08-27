@@ -35,12 +35,16 @@ resource "proxmox_virtual_environment_vm" "proxmox_vm" {
   # Optional blank secondary data disk (e.g. for Longhorn). No `file_id` and no
   # clone source here - this is what makes Proxmox allocate genuinely empty
   # raw storage on scsi1 instead of trying to clone/import an image onto it.
+  # file_format must be explicit "raw": local-lvm is LVM-Thin block storage
+  # and rejects qcow2 (the provider's default for a fresh disk) with
+  # "unsupported format 'qcow2'" (LvmThinPlugin.pm).
   dynamic "disk" {
     for_each = var.secondary_disk_size != null ? [var.secondary_disk_size] : []
     content {
       datastore_id = "local-lvm"
       interface    = "scsi1"
       size         = disk.value
+      file_format  = "raw"
     }
   }
 

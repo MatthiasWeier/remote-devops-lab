@@ -4,6 +4,9 @@
 
 This repository documents my journey from manual click-ops to a fully automated cloud environment managed via Infrastructure as Code (IaC) on Oracle Cloud Infrastructure (OCI).
 
+📄 **[Overview for recruiters](docs/00-for-recruiters.md)** — what this is and why it exists, in plain language.
+📄 **[Full setup & runbook](docs/01-setup-and-runbook.md)** — architecture diagram, step-by-step replication guide, and every bug hit along the way (with fixes).
+
 ---
 
 ## Tech Stack
@@ -52,6 +55,7 @@ Focus: Stand up a self-hosted, GitOps-managed Kubernetes platform on bare-metal 
 - [x] **Proxmox IaC:** Migrated to the `bpg/proxmox` Terraform provider; modular `ubuntu-vm` module, `for_each`-driven, provisions a 3-node K3s cluster (1 control-plane + 2 workers) from a single `vms` map.
 - [x] **Cloud-Init:** Static IPs, injected SSH public key, and the QEMU guest agent enabled on every node.
 - [x] **Dynamic Ansible Inventory:** Terraform generates `ansible/inventories/production/hosts.ini` with `[control_plane]` / `[workers]` groups straight from node `role`, ready for K3s bootstrapping playbooks.
+- [x] **K3s Cluster Bootstrap:** `ansible/playbooks/install-k3s.yml` installs the K3s server on the control-plane, retrieves its node token, and joins both workers as agents.
 - [x] **Distributed Block Storage:** Longhorn, backed by a Terraform-provisioned secondary disk (`scsi1`, 50GB) attached to worker nodes only; formatted, and mounted at `/var/lib/longhorn` via `ansible/playbooks/setup-longhorn-nodes.yml`.
 - [x] **GitOps Bootstrap:** ArgoCD installed via `kubernetes/bootstrap/install-argocd.sh`.
 - [x] **First GitOps App:** `kube-prometheus-stack` deployed as an ArgoCD `Application` (`kubernetes/apps/kube-prometheus-stack.yaml`), with Prometheus, Alertmanager, and Grafana PVCs all backed by Longhorn — proving persistent, replicated storage survives pod/node loss end to end.
@@ -110,6 +114,7 @@ remote-devops-lab/
 │   │   ├── site.yml                     <-- Master playbook (Docker/proxy nodes)
 │   │   ├── docker.yml                   <-- Maps docker role to VMs
 │   │   ├── proxy.yml                    <-- Maps proxy role to VMs
+│   │   ├── install-k3s.yml              <-- Bootstraps the K3s cluster itself (server + agent join)
 │   │   └── setup-longhorn-nodes.yml     <-- Preps K3s workers' secondary disk for Longhorn
 │   │
 │   └── roles/

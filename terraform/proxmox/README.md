@@ -12,6 +12,8 @@ This Terraform configuration allows you to:
 - Clone from a **Debian Cloud-Init template**, with the QEMU guest agent enabled
 - Auto-generate an **Ansible inventory** (`control_plane` / `workers` groups) for a follow-up K3s playbook run
 
+> **Note:** Two pre-existing VMs on this Proxmox host (`Gameserver-Bazzite` / vmid 999, `Pterodactyl-Gameserver` / vmid 200) are intentionally **not managed by this Terraform config**. Do not add them to the `vms` map. New K3s node vmids (510+) and the Cloud-Init template vmid (9000) were chosen to avoid colliding with them. Also note the two existing VMs already consume 40GiB RAM of the host's 64GiB - the K3s cluster's 16GiB request leaves headroom, but don't grow node memory much further without checking free capacity first.
+
 ## Quick Start
 
 ### Prerequisites
@@ -27,7 +29,7 @@ This Terraform configuration allows you to:
    - `VM.Config.HWType`
    - `VM.PowerMgmt`
 
-4. **Debian 13 Cloud-Init Template** in Proxmox (VM ID 999 or adjust in module)
+4. **Debian Cloud-Init Template** in Proxmox, identified by its numeric VM ID (set as `template_vm_id` per node in `terraform.tfvars`). Don't have one yet? Run `create-cloudinit-template.sh` directly on the Proxmox host (as root) to build a Debian 13 template with `qemu-guest-agent` baked in - see that script's header comment for details.
 5. **SSH Public Key** available locally (e.g., `~/.ssh/id_rsa.pub`)
 
 ### Setup
@@ -122,6 +124,7 @@ terraform/proxmox/
 ├── outputs.tf                       # Output values (VM IPs and IDs)
 ├── providers.tf                     # Proxmox provider configuration
 ├── terraform.tfvars.example         # Example configuration (copy to terraform.tfvars)
+├── create-cloudinit-template.sh     # One-time script (run on Proxmox host) to build the clone source template
 ├── .gitignore                       # Git ignore rules
 ├── README.md                        # This file
 └── modules/

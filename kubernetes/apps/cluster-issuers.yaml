@@ -1,0 +1,25 @@
+# Plain Kubernetes manifest, not an ArgoCD Application - the ClusterIssuer
+# CRD only exists once the cert-manager Application above has synced, so
+# this must be applied AFTER cert-manager is running:
+#   kubectl apply -f kubernetes/apps/cluster-issuers.yaml
+#
+# (Same first-run pattern as kubernetes/apps/kube-prometheus-stack.yaml -
+# see the root README's Phase 6 "App-of-Apps" item for why this manual step
+# still exists.)
+
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    # TODO: set a real, monitored mailbox - Let's Encrypt sends renewal/
+    # expiry and policy notices here. Do not leave this placeholder.
+    email: "CHANGE-ME@example.com"
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: traefik

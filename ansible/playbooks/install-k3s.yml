@@ -1,0 +1,105 @@
+---
+# Bootstraps the K3s cluster itself: installs the K3s server on the
+# control-plane node, then joins both worker nodes as agents using the
+# server's node token. Run this against the fresh VMs from `terraform apply`
+# before setup-longhorn-nodes.yml or the ArgoCD bootstrap script.
+#
+# Idempotent: re-running is safe, the install script is skipped wherever the
+# corresponding systemd unit already exists.
+
+- name: Install K3s server on the control-plane
+  hosts: control_plane
+  become: yes
+  gather_facts: yes
+  tags:
+    - k3s
+    - k3s_server
+
+  tasks:
+    - name: Display target host
+      debug:
+        msg: "Installing K3s server on {{ inventory_hostname }} ({{ ansible_host }})"
+      tags:
+        - always
+
+    - name: Run the K3s install script in server mode
+      shell: |
+        curl -sfL https://get.k3s.io | sh -s - server \
+          --node-ip {{ ansible_host }} \
+          --advertise-address {{ ansible_host }} \
+          --write-kubeconfig-mode 644
+      args:
+        creates: /etc/systemd/system/k3s.service
+
+    - name: Wait for the node token to be written
+      wait_for:
+        path: /var/lib/rancher/k3s/server/node-token
+        timeout: 120
+
+    - name: Read the node token
+      slurp:
+        src: /var/lib/rancher/k3s/server/node-token
+      register: k3s_node_token_raw
+
+    - name: Expose the node token as a fact for the worker play below
+      set_fact:
+        k3s_node_token: "{{ k3s_node_token_raw.content | b64decode | trim }}"
+
+    - name: Wait for the K3s API to report Ready
+      command: k3s kubectl get nodes
+      register: k3s_ready_check
+      until: k3s_ready_check.rc == 0
+      retries: 12
+      delay: 10
+      changed_when: false
+
+- name: Join worker nodes to the K3s cluster
+  hosts: workers
+  become: yes
+  gather_facts: yes
+  vars:
+    control_plane_host: "{{ hostvars[groups['control_plane'][0]]['ansible_host'] }}"
+    k3s_token: "{{ hostvars[groups['control_plane'][0]]['k3s_node_token'] }}"
+  tags:
+    - k3s
+    - k3s_agent
+
+  tasks:
+    - name: Display target host
+      debug:
+        msg: "Joining {{ inventory_hostname }} ({{ ansible_host }}) to K3s server at {{ control_plane_host }}"
+      tags:
+        - always
+
+    - name: Run the K3s install script in agent mode
+      shell: |
+        curl -sfL https://get.k3s.io | K3S_URL=https://{{ control_plane_host }}:6443 K3S_TOKEN={{ k3s_token }} sh -s - agent \
+          --node-ip {{ ansible_host }}
+      args:
+        creates: /etc/systemd/system/k3s-agent.service
+
+- name: Verify cluster status
+  hosts: control_plane
+  become: yes
+  gather_facts: no
+  tags:
+    - k3s
+    - verify
+
+  tasks:
+    - name: Wait for both worker nodes to register
+      command: k3s kubectl get nodes --no-headers
+      register: k3s_nodes_check
+      until: (k3s_nodes_check.stdout_lines | length) == ((groups['control_plane'] | length) + (groups['workers'] | length))
+      retries: 12
+      delay: 10
+      changed_when: false
+
+    - name: Display cluster nodes
+      command: k3s kubectl get nodes -o wide
+      register: k3s_nodes
+      changed_when: false
+
+    - name: Show node status
+      debug:
+        msg: "{{ k3s_nodes.stdout_lines }}"

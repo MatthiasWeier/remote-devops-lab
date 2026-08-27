@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: bookstack
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  # Raw Kubernetes manifests (not a Helm chart) - see
+  # kubernetes/apps/manifests/bookstack/bookstack.yaml. Same reasoning as
+  # tandoor.yaml: reliability over betting on a community chart's schema.
+  source:
+    repoURL: https://github.com/MatthiasWeier/remote-devops-lab.git
+    targetRevision: main
+    path: kubernetes/apps/manifests/bookstack
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: bookstack
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

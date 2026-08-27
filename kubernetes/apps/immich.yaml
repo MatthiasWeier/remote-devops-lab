@@ -1,0 +1,112 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: immich
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://immich-app.github.io/immich-charts
+    chart: immich
+    # Immich's chart moves fast and has occasionally changed distribution
+    # method (classic Helm repo vs OCI at ghcr.io/immich-app/immich-charts).
+    # Verify before first apply:
+    #   helm repo add immich https://immich-app.github.io/immich-charts
+    #   helm search repo immich/immich --versions
+    targetRevision: 0.9.1
+    helm:
+      values: |
+        # NOTE: Immich removed Typesense in favor of native Postgres
+        # (pgvector) search around v1.90 - current chart versions don't
+        # have a Typesense component, so it's intentionally absent below.
+        # If you're targeting an older Immich release that still needs
+        # Typesense, this manifest doesn't cover that.
+        #
+        # NOTE: `existingSecret: immich-postgres-secret` below is
+        # intentional - no DB password is committed to git. Create it
+        # once, manually, before the first sync:
+        #   kubectl create namespace immich
+        #   kubectl create secret generic immich-postgres-secret -n immich \
+        #     --from-literal=postgres-password=<random> \
+        #     --from-literal=password=<random>
+        # (This is exactly the gap Phase 6 of the root README flags under
+        # "GitOps Secrets Management" - a real Sealed Secrets / External
+        # Secrets setup would remove this manual step.)
+        #
+        # All value paths below reflect the immich-charts umbrella chart's
+        # structure as of this writing - run `helm show values immich/immich
+        # --version <targetRevision>` before first apply and adjust key
+        # names if they've drifted.
+
+        server:
+          ingress:
+            main:
+              enabled: true
+              ingressClassName: traefik
+              annotations:
+                cert-manager.io/cluster-issuer: letsencrypt-prod
+              hosts:
+                - host: photos.example.com # TODO: real domain
+                  paths:
+                    - path: /
+                      pathType: Prefix
+              tls:
+                - secretName: immich-tls
+                  hosts:
+                    - photos.example.com # TODO: real domain
+
+          persistence:
+            library:
+              enabled: true
+              storageClass: longhorn
+              size: 200Gi
+              accessMode: ReadWriteOnce
+
+        machine-learning:
+          persistence:
+            cache:
+              enabled: true
+              storageClass: longhorn
+              size: 20Gi
+
+        # Bundled Postgres - overridden to a pgvector-capable image, since
+        # Immich requires the vector extension and plain postgres images
+        # don't have it.
+        postgresql:
+          enabled: true
+          image:
+            repository: tensorchord/pgvecto-rs
+            tag: pg14-v0.2.0
+          global:
+            postgresql:
+              auth:
+                username: immich
+                database: immich
+                existingSecret: immich-postgres-secret
+          primary:
+            persistence:
+              enabled: true
+              storageClass: longhorn
+              size: 50Gi
+
+        redis:
+          enabled: true
+          master:
+            persistence:
+              enabled: true
+              storageClass: longhorn
+              size: 5Gi
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: immich
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

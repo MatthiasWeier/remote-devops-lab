@@ -1,0 +1,191 @@
+# Standard Kubernetes deployment for BookStack.
+# App image: lscr.io/linuxserver/bookstack (LinuxServer.io's maintained image).
+# DB image: mariadb:11 (official) - BookStack is a Laravel/PHP app and needs
+# MySQL/MariaDB, not Postgres.
+# Verify current tags before first sync:
+#   https://docs.linuxserver.io/images/docker-bookstack/
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bookstack-secrets
+  namespace: bookstack
+type: Opaque
+stringData:
+  # TODO: replace both before first sync - see the same secrets-management
+  # note as kubernetes/apps/manifests/tandoor/tandoor.yaml.
+  MYSQL_ROOT_PASSWORD: "CHANGE-ME-root-password"
+  MYSQL_PASSWORD: "CHANGE-ME-bookstack-password"
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bookstack-db-data
+  namespace: bookstack
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bookstack-uploads
+  namespace: bookstack
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: bookstack-db
+  namespace: bookstack
+spec:
+  serviceName: bookstack-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bookstack-db
+  template:
+    metadata:
+      labels:
+        app: bookstack-db
+    spec:
+      containers:
+        - name: mariadb
+          image: mariadb:11
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: bookstack-secrets
+                  key: MYSQL_ROOT_PASSWORD
+            - name: MYSQL_DATABASE
+              value: bookstack
+            - name: MYSQL_USER
+              value: bookstack
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: bookstack-secrets
+                  key: MYSQL_PASSWORD
+          ports:
+            - containerPort: 3306
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: bookstack-db-data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bookstack-db
+  namespace: bookstack
+spec:
+  selector:
+    app: bookstack-db
+  ports:
+    - port: 3306
+      targetPort: 3306
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bookstack
+  namespace: bookstack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bookstack
+  template:
+    metadata:
+      labels:
+        app: bookstack
+    spec:
+      containers:
+        - name: bookstack
+          image: lscr.io/linuxserver/bookstack:latest
+          ports:
+            - containerPort: 80
+          env:
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+            - name: TZ
+              value: "Europe/Berlin"
+            - name: APP_URL
+              value: "https://wiki.example.com" # TODO: real domain
+            - name: DB_HOST
+              value: bookstack-db
+            - name: DB_USER
+              value: bookstack
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: bookstack-secrets
+                  key: MYSQL_PASSWORD
+            - name: DB_DATABASE
+              value: bookstack
+          volumeMounts:
+            - name: uploads
+              mountPath: /config
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: bookstack-uploads
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bookstack
+  namespace: bookstack
+spec:
+  selector:
+    app: bookstack
+  ports:
+    - port: 80
+      targetPort: 80
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bookstack
+  namespace: bookstack
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - wiki.example.com # TODO: real domain
+      secretName: bookstack-tls
+  rules:
+    - host: wiki.example.com # TODO: real domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bookstack
+                port:
+                  number: 80

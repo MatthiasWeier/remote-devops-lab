@@ -1,0 +1,211 @@
+# Standard Kubernetes deployment for Tandoor Recipes.
+# Image: vabene1111/recipes (Tandoor's official Docker Hub image).
+# Verify current tag before first sync: https://hub.docker.com/r/vabene1111/recipes/tags
+# Env var names below match Tandoor's documented Docker env config as of
+# this writing - double check against current docs if the app fails to
+# start after `latest` moves on.
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tandoor-secrets
+  namespace: tandoor
+type: Opaque
+stringData:
+  # TODO: replace both before first sync - do not leave placeholders in a
+  # real deployment. Once the Sealed Secrets / External Secrets gap
+  # (root README, Phase 6) is closed, this should move out of plaintext git.
+  SECRET_KEY: "CHANGE-ME-random-django-secret-key"
+  POSTGRES_PASSWORD: "CHANGE-ME-postgres-password"
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tandoor-postgres-data
+  namespace: tandoor
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tandoor-media
+  namespace: tandoor
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tandoor-static
+  namespace: tandoor
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 2Gi
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tandoor-postgres
+  namespace: tandoor
+spec:
+  serviceName: tandoor-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tandoor-postgres
+  template:
+    metadata:
+      labels:
+        app: tandoor-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          env:
+            - name: POSTGRES_DB
+              value: tandoor
+            - name: POSTGRES_USER
+              value: tandoor
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tandoor-secrets
+                  key: POSTGRES_PASSWORD
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+              subPath: postgres
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: tandoor-postgres-data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tandoor-postgres
+  namespace: tandoor
+spec:
+  selector:
+    app: tandoor-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tandoor
+  namespace: tandoor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tandoor
+  template:
+    metadata:
+      labels:
+        app: tandoor
+    spec:
+      containers:
+        - name: tandoor
+          image: vabene1111/recipes:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tandoor-secrets
+                  key: SECRET_KEY
+            - name: DB_ENGINE
+              value: django.db.backends.postgresql
+            - name: POSTGRES_HOST
+              value: tandoor-postgres
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_USER
+              value: tandoor
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tandoor-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              value: tandoor
+            - name: ALLOWED_HOSTS
+              value: "recipes.example.com" # TODO: real domain
+            - name: TANDOOR_PORT
+              value: "8080"
+          volumeMounts:
+            - name: media
+              mountPath: /opt/recipes/mediafiles
+            - name: static
+              mountPath: /opt/recipes/staticfiles
+      volumes:
+        - name: media
+          persistentVolumeClaim:
+            claimName: tandoor-media
+        - name: static
+          persistentVolumeClaim:
+            claimName: tandoor-static
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tandoor
+  namespace: tandoor
+spec:
+  selector:
+    app: tandoor
+  ports:
+    - port: 80
+      targetPort: 8080
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tandoor
+  namespace: tandoor
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - recipes.example.com # TODO: real domain
+      secretName: tandoor-tls
+  rules:
+    - host: recipes.example.com # TODO: real domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tandoor
+                port:
+                  number: 80

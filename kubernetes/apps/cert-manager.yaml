@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://charts.jetstack.io
+    chart: cert-manager
+    # Pin an explicit version rather than tracking latest. Verify current with:
+    #   helm repo add jetstack https://charts.jetstack.io
+    #   helm search repo jetstack/cert-manager --versions
+    targetRevision: v1.16.2
+    helm:
+      values: |
+        installCRDs: true
+        # Newer chart releases (roughly 1.15+) additionally expose
+        # `crds.enabled: true` as the preferred toggle. If CRDs don't show
+        # up after the first sync, check this chart version's values.yaml
+        # and add:
+        #   crds:
+        #     enabled: true
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

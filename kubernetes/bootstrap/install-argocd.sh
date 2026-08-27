@@ -15,7 +15,13 @@ echo "Creating '${ARGOCD_NAMESPACE}' namespace..."
 kubectl create namespace "${ARGOCD_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
 echo "Applying upstream ArgoCD manifests from ${ARGOCD_MANIFEST_URL}..."
-kubectl apply -n "${ARGOCD_NAMESPACE}" -f "${ARGOCD_MANIFEST_URL}"
+# --server-side: a plain `kubectl apply` stores the full previous object as a
+# last-applied-configuration annotation for 3-way merges, and ArgoCD's
+# applicationsets.argoproj.io CRD has a large enough OpenAPI schema to blow
+# past the 256KiB annotation size limit ("Too long: may not be more than
+# 262144 bytes"). Server-side apply lets the API server do the diff instead,
+# so no such annotation is written.
+kubectl apply --server-side --force-conflicts -n "${ARGOCD_NAMESPACE}" -f "${ARGOCD_MANIFEST_URL}"
 
 echo "Waiting for the argocd-server deployment to become available (this can take a few minutes)..."
 kubectl -n "${ARGOCD_NAMESPACE}" rollout status deployment/argocd-server --timeout=300s
