@@ -5,17 +5,20 @@
 ansible_connection=ssh
 ansible_port=22
 ansible_user=matt
-ansible_ssh_private_key_file=/root/.ssh/id_ed25519
-ansible_become_pass=${ssh_password}
+ansible_ssh_private_key_file=~/.ssh/id_ed25519
 
-[docker_nodes]
-%{ for name, vm in docker_nodes ~}
+[control_plane]
+%{ for name, vm in control_plane_nodes ~}
 ${name} ansible_host=${split("/", vm.ip_address)[0]}
 %{ endfor ~}
 
-[proxy_nodes]
-%{ for name, vm in proxy_nodes ~}
+[workers]
+%{ for name, vm in worker_nodes ~}
 ${name} ansible_host=${split("/", vm.ip_address)[0]}
 %{ endfor ~}
+
+[k3s_cluster:children]
+control_plane
+workers
 
 [ungrouped]

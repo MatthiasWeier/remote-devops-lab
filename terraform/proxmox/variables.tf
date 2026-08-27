@@ -36,27 +36,35 @@ variable "ssh_public_key_path" {
 }
 
 variable "vms" {
-  description = "Map of VMs to create with their specifications."
+  description = "Map of K3s cluster VMs to create with their specifications."
   type = map(object({
-    vmid       = number
-    clone_from = string
-    cores      = number
-    memory     = number
-    disk_size  = number
-    ip_address = string
-    gateway    = string
+    vmid                = number
+    template_vm_id      = number
+    role                = string # "control-plane" or "worker"
+    cores               = number
+    memory              = number
+    disk_size           = number
+    secondary_disk_size = optional(number) # e.g. for Longhorn storage on worker nodes
+    ip_address          = string
+    gateway             = string
   }))
   default = {}
+
+  validation {
+    condition = alltrue([
+      for vm in var.vms : contains(["control-plane", "worker"], vm.role)
+    ])
+    error_message = "Each VM's role must be either \"control-plane\" or \"worker\"."
+  }
+
+  validation {
+    condition     = length([for vm in var.vms : vm if vm.role == "control-plane"]) == 1
+    error_message = "Exactly one VM in the vms map must have role = \"control-plane\"."
+  }
 }
 
 variable "network_bridge" {
   description = "The Proxmox network bridge to use (e.g., vmbr0)"
   type        = string
   default     = "vmbr0"
-}
-
-variable "ssh_password" {
-  description = "SSH password for the matt user on VMs"
-  type        = string
-  sensitive   = true
 }

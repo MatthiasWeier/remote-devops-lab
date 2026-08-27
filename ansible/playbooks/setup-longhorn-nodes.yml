@@ -1,0 +1,127 @@
+---
+# Prepares K3s worker nodes for Longhorn distributed block storage:
+# installs iSCSI/NFS prerequisites and formats + mounts the secondary
+# Terraform-provisioned disk (scsi1) at /var/lib/longhorn.
+#
+# Only targets `workers` because control-plane nodes are not given a
+# secondary_disk_size in terraform.tfvars - see terraform/proxmox/README.md.
+# If you later schedule workloads on the control-plane too, give it a
+# secondary_disk_size in Terraform first, then add it to this play's hosts.
+
+- name: Prepare nodes for Longhorn storage
+  hosts: workers
+  become: yes
+  gather_facts: yes
+  vars:
+    longhorn_mount_path: /var/lib/longhorn
+    longhorn_filesystem: ext4
+    # Must correspond to the scsi1 disk size set via `secondary_disk_size`
+    # in terraform.tfvars. Device naming for a freshly cloned VM is sda=scsi0,
+    # sdb=scsi1, but this is not a hard guarantee - the pre_tasks check below
+    # fails loudly instead of silently formatting the wrong disk.
+    longhorn_data_disk: /dev/sdb
+  tags:
+    - longhorn
+    - longhorn_nodes
+
+  pre_tasks:
+    - name: Display target hosts
+      debug:
+        msg: "Preparing {{ inventory_hostname }} for Longhorn storage"
+      tags:
+        - always
+
+    - name: Verify secondary data disk exists
+      stat:
+        path: "{{ longhorn_data_disk }}"
+      register: longhorn_disk_stat
+      tags:
+        - always
+
+    - name: Fail if secondary data disk is missing
+      assert:
+        that:
+          - longhorn_disk_stat.stat.exists
+          - longhorn_disk_stat.stat.isblk
+        fail_msg: >
+          {{ longhorn_data_disk }} was not found on {{ inventory_hostname }}.
+          Confirm `secondary_disk_size` is set for this node in terraform.tfvars
+          and that `terraform apply` has been run.
+      tags:
+        - always
+
+  tasks:
+    - name: Install Longhorn OS prerequisites
+      apt:
+        name:
+          - open-iscsi
+          - nfs-common
+          - util-linux
+        state: present
+        update_cache: yes
+      tags:
+        - longhorn
+        - packages
+
+    - name: Ensure iscsid service is enabled and started
+      systemd:
+        name: iscsid
+        state: started
+        enabled: yes
+      tags:
+        - longhorn
+        - services
+
+    - name: Check for an existing filesystem on the secondary disk
+      command: "blkid -o value -s TYPE {{ longhorn_data_disk }}"
+      register: longhorn_disk_fstype
+      changed_when: false
+      failed_when: false
+      tags:
+        - longhorn
+        - storage
+
+    - name: Create {{ longhorn_filesystem }} filesystem on secondary disk
+      filesystem:
+        fstype: "{{ longhorn_filesystem }}"
+        dev: "{{ longhorn_data_disk }}"
+      when: longhorn_disk_fstype.stdout | length == 0
+      tags:
+        - longhorn
+        - storage
+
+    - name: Create Longhorn mount point
+      file:
+        path: "{{ longhorn_mount_path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      tags:
+        - longhorn
+        - storage
+
+    - name: Mount secondary disk persistently via /etc/fstab
+      mount:
+        path: "{{ longhorn_mount_path }}"
+        src: "{{ longhorn_data_disk }}"
+        fstype: "{{ longhorn_filesystem }}"
+        opts: defaults,nofail
+        state: mounted
+      tags:
+        - longhorn
+        - storage
+
+  post_tasks:
+    - name: Verify Longhorn mount point is active
+      command: "findmnt {{ longhorn_mount_path }}"
+      register: longhorn_mount_check
+      changed_when: false
+      tags:
+        - verify
+
+    - name: Display Longhorn mount status
+      debug:
+        msg: "{{ longhorn_mount_check.stdout_lines }}"
+      tags:
+        - verify

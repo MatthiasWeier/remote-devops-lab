@@ -11,15 +11,17 @@ module "ubuntu_vm" {
   source = "./modules/ubuntu-vm"
 
   # General VM settings
-  name        = each.key
-  node_name   = var.proxmox_node_name
-  clone_from  = each.value.clone_from
-  vmid        = each.value.vmid
+  name           = each.key
+  node_name      = var.proxmox_node_name
+  template_vm_id = each.value.template_vm_id
+  role           = each.value.role
+  vmid           = each.value.vmid
 
   # Hardware specifications
-  cores       = each.value.cores
-  memory      = each.value.memory
-  disk_size   = each.value.disk_size
+  cores               = each.value.cores
+  memory              = each.value.memory
+  disk_size           = each.value.disk_size
+  secondary_disk_size = each.value.secondary_disk_size
 
   # Network settings
   network_bridge = var.network_bridge
@@ -27,30 +29,30 @@ module "ubuntu_vm" {
   gateway        = each.value.gateway
 
   # Cloud-Init settings
-  ssh_keys    = [file(var.ssh_public_key_path)]
+  ssh_keys = [file(var.ssh_public_key_path)]
 }
 
-# Separate VMs into docker_nodes and proxy_nodes based on naming convention
+# Split K3s nodes into control_plane and workers by their explicit role
+# attribute (set in the vms map), not by fragile name matching.
 locals {
-  docker_nodes = {
+  control_plane_nodes = {
     for name, vm in module.ubuntu_vm : name => vm
-    if can(regex("webserver|docker", name))
+    if vm.role == "control-plane"
   }
 
-  proxy_nodes = {
+  worker_nodes = {
     for name, vm in module.ubuntu_vm : name => vm
-    if can(regex("database|proxy", name))
+    if vm.role == "worker"
   }
 }
 
 # Generate Ansible inventory file from template
 resource "local_file" "ansible_inventory" {
   filename = "${path.module}/../../ansible/inventories/production/hosts.ini"
-  
+
   content = templatefile("${path.module}/inventory.tftpl", {
-    docker_nodes   = local.docker_nodes
-    proxy_nodes    = local.proxy_nodes
-    ssh_password   = var.ssh_password
+    control_plane_nodes = local.control_plane_nodes
+    worker_nodes        = local.worker_nodes
   })
 
   depends_on = [module.ubuntu_vm]

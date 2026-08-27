@@ -2,12 +2,19 @@ resource "proxmox_virtual_environment_vm" "proxmox_vm" {
   name        = var.name
   vm_id       = var.vmid
   node_name   = var.node_name
-  description = "Managed by Terraform (BPG Provider)"
+  description = "Managed by Terraform (BPG Provider) - K3s ${var.role}"
+  tags        = ["k3s", var.role]
 
-  # Clone configuration
+  # Clone from an existing Cloud-Init template (identified by numeric VM ID)
   clone {
-    vm_id = 1001 # Replace with your Template-ID (e.g. 999)
+    vm_id = var.template_vm_id
     full  = true
+  }
+
+  # Required for Terraform/Proxmox to report VM state (IP, running status) reliably,
+  # and a prerequisite for clean K3s node bootstrapping.
+  agent {
+    enabled = true
   }
 
   cpu {
@@ -21,9 +28,20 @@ resource "proxmox_virtual_environment_vm" "proxmox_vm" {
 
   disk {
     datastore_id = "local-lvm"
-    file_id      = "local:iso/debian-13-generic-amd64.qcow2" # Optional: if not cloning
     interface    = "scsi0"
     size         = var.disk_size
+  }
+
+  # Optional blank secondary data disk (e.g. for Longhorn). No `file_id` and no
+  # clone source here - this is what makes Proxmox allocate genuinely empty
+  # raw storage on scsi1 instead of trying to clone/import an image onto it.
+  dynamic "disk" {
+    for_each = var.secondary_disk_size != null ? [var.secondary_disk_size] : []
+    content {
+      datastore_id = "local-lvm"
+      interface    = "scsi1"
+      size         = disk.value
+    }
   }
 
   network_device {
@@ -31,14 +49,15 @@ resource "proxmox_virtual_environment_vm" "proxmox_vm" {
   }
 
   initialization {
-	datastore_id = "local-lvm"
-	
+    datastore_id = "local-lvm"
+
     ip_config {
       ipv4 {
         address = var.ip_address
         gateway = var.gateway
       }
     }
+
     user_account {
       keys     = var.ssh_keys
       username = "matt"

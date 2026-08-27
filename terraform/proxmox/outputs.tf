@@ -25,22 +25,22 @@ output "ansible_inventory_path" {
   value       = local_file.ansible_inventory.filename
 }
 
-# Output docker nodes
-output "docker_nodes" {
-  description = "Map of docker nodes with their details"
+# Output K3s control-plane node(s)
+output "control_plane_nodes" {
+  description = "Map of K3s control-plane nodes with their details"
   value = {
-    for name, vm in local.docker_nodes : name => {
+    for name, vm in local.control_plane_nodes : name => {
       ip_address = vm.ip_address
       vmid       = vm.vmid
     }
   }
 }
 
-# Output proxy nodes
-output "proxy_nodes" {
-  description = "Map of proxy nodes with their details"
+# Output K3s worker nodes
+output "worker_nodes" {
+  description = "Map of K3s worker nodes with their details"
   value = {
-    for name, vm in local.proxy_nodes : name => {
+    for name, vm in local.worker_nodes : name => {
       ip_address = vm.ip_address
       vmid       = vm.vmid
     }

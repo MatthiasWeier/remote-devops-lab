@@ -1,34 +1,48 @@
 # Proxmox API Configuration
-proxmox_api_url         = "https://your-proxmox-host:8006/api2/json"
-proxmox_api_token_id    = "user@realm!token_name"
+proxmox_api_url          = "https://your-proxmox-host:8006/api2/json"
+proxmox_api_token_id     = "user@realm!token_name"
 proxmox_api_token_secret = "your-api-token-secret"
-proxmox_node_name       = "pve"
-network_bridge          = "vmbr0"
-ssh_public_key_path     = "~/.ssh/id_ed25519.pub"
-ssh_password            = "your-ssh-password"
+proxmox_node_name        = "pve"
+network_bridge           = "vmbr0"
+ssh_public_key_path      = "~/.ssh/id_ed25519.pub"
 
-# VM Configuration Map
-# Each VM can have completely different specifications
-# VMs with "webserver" or "docker" in the name will be added to docker_nodes group
-# VMs with "database" or "proxy" in the name will be added to proxy_nodes group
+# K3s Cluster VM Configuration Map
+# Exactly one entry must have role = "control-plane"; the rest should be role = "worker".
+# template_vm_id must be the numeric VM ID of your Cloud-Init template in Proxmox
+# (find it with `qm list` on the Proxmox host).
 vms = {
-  "Terra-debian-webserver" = {
-    vmid       = 100
-    clone_from = "debian-13-cloudinit"
-    cores      = 2
-    memory     = 2048      # 2 GB RAM
-    disk_size  = 32
-    ip_address = "192.168.178.150/24"
-    gateway    = "192.168.178.1"
+  "k3s-cp-01" = {
+    vmid           = 510
+    template_vm_id = 9000 # <-- your Cloud-Init template's numeric VM ID
+    role           = "control-plane"
+    cores          = 2
+    memory         = 4096 # 4 GB RAM
+    disk_size      = 30
+    ip_address     = "192.168.1.160/24"
+    gateway        = "192.168.1.1"
   }
 
-  "Terra-debian-database" = {
-    vmid       = 101
-    clone_from = "debian-13-cloudinit"
-    cores      = 4
-    memory     = 8192      # 8 GB RAM
-    disk_size  = 100
-    ip_address = "192.168.178.151/24"
-    gateway    = "192.168.178.1"
+  "k3s-worker-01" = {
+    vmid                = 511
+    template_vm_id      = 9000
+    role                = "worker"
+    cores               = 2
+    memory              = 6144 # 6 GB RAM (adjust within 4-8 GB as needed)
+    disk_size           = 40
+    secondary_disk_size = 50 # Longhorn storage disk (scsi1) - worker nodes only
+    ip_address          = "192.168.1.161/24"
+    gateway             = "192.168.1.1"
+  }
+
+  "k3s-worker-02" = {
+    vmid                = 512
+    template_vm_id      = 9000
+    role                = "worker"
+    cores               = 2
+    memory              = 6144 # 6 GB RAM (adjust within 4-8 GB as needed)
+    disk_size           = 40
+    secondary_disk_size = 50 # Longhorn storage disk (scsi1) - worker nodes only
+    ip_address          = "192.168.1.162/24"
+    gateway             = "192.168.1.1"
   }
 }

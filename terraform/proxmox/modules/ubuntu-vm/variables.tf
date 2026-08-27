@@ -19,10 +19,19 @@ variable "node_name" {
   type        = string
 }
 
-variable "clone_from" {
-  description = "The name of the Cloud-Init Ubuntu template in Proxmox to clone from."
+variable "template_vm_id" {
+  description = "The numeric VM ID of the Cloud-Init template to clone from (the bpg/proxmox clone block requires a numeric ID, not a template name)."
+  type        = number
+}
+
+variable "role" {
+  description = "The role of this node in the K3s cluster (e.g. 'control-plane' or 'worker'). Used for tagging and Ansible inventory grouping."
   type        = string
-  default     = "ubuntu-cloudinit-template" # Example: Make sure this template exists
+
+  validation {
+    condition     = contains(["control-plane", "worker"], var.role)
+    error_message = "role must be either \"control-plane\" or \"worker\"."
+  }
 }
 
 # Hardware specifications
@@ -42,6 +51,12 @@ variable "disk_size" {
   description = "Size of the main disk of the VM in GB."
   type        = number
   default     = 32
+}
+
+variable "secondary_disk_size" {
+  description = "Size in GB of an optional secondary raw data disk (attached as scsi1), e.g. for Longhorn storage. Leave null to skip."
+  type        = number
+  default     = null
 }
 
 # Network settings

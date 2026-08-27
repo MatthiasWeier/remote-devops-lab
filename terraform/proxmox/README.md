@@ -1,15 +1,16 @@
-# Proxmox Terraform Module - Modular VM Deployment
+# Proxmox Terraform Module - K3s Cluster Deployment
 
-A fully modular Terraform configuration for deploying multiple Debian 13 VMs on Proxmox with completely different hardware specifications.
+A modular Terraform configuration for provisioning a K3s Kubernetes cluster (1 control-plane + N workers) on Proxmox, using the `bpg/proxmox` provider.
 
 ## Overview
 
 This Terraform configuration allows you to:
-- Deploy an **arbitrary number of VMs** with a single `terraform apply`
-- Assign **completely different hardware specs** to each VM (CPU cores, RAM, disk size)
-- Use **dynamic IP addressing** with static CIDR notation
-- Manage all VMs through a **centralized variable map** (`vms`)
-- Clone from **Debian 13 Cloud-Init templates**
+- Deploy a K3s cluster (control-plane + worker nodes) with a single `terraform apply`
+- Assign **different hardware specs per role** (CPU cores, RAM, disk size)
+- Use **static IP addressing** (required for predictable K3s node communication)
+- Manage all nodes through a **centralized variable map** (`vms`), each tagged with an explicit `role`
+- Clone from a **Debian Cloud-Init template**, with the QEMU guest agent enabled
+- Auto-generate an **Ansible inventory** (`control_plane` / `workers` groups) for a follow-up K3s playbook run
 
 ## Quick Start
 
@@ -44,12 +45,12 @@ This Terraform configuration allows you to:
 
 3. **Edit `terraform.tfvars` with your Proxmox details:**
    ```hcl
-   proxmox_api_url         = "https://your-proxmox-host:8006/api2/json"
-   proxmox_api_token_id    = "root@pam!terraform"
+   proxmox_api_url          = "https://your-proxmox-host:8006/api2/json"
+   proxmox_api_token_id     = "root@pam!terraform"
    proxmox_api_token_secret = "your-secret-token"
-   proxmox_node_name       = "pve"
-   network_bridge          = "vmbr0"
-   ssh_public_key_path     = "~/.ssh/id_rsa.pub"
+   proxmox_node_name        = "pve"
+   network_bridge           = "vmbr0"
+   ssh_public_key_path      = "~/.ssh/id_ed25519.pub"
    ```
 
 4. **Initialize Terraform:**
@@ -71,67 +72,46 @@ This Terraform configuration allows you to:
 
 ### VM Map Structure
 
-Define your VMs in `terraform.tfvars` using the `vms` map:
+Define your K3s nodes in `terraform.tfvars` using the `vms` map. Exactly one entry must have `role = "control-plane"`; the rest should be `role = "worker"`:
 
 ```hcl
 vms = {
-  "vm-name-1" = {
-    vmid       = 100                    # Unique VM ID
-    clone_from = "debian-13-cloudinit"  # Template name
-    cores      = 2                      # CPU cores
-    memory     = 2048                   # RAM in MB
-    disk_size  = 32                     # Disk size in GB
-    ip_address = "192.168.1.100/24"     # Static IP with CIDR
-    gateway    = "192.168.1.1"          # Default gateway
+  "k3s-cp-01" = {
+    vmid           = 510                  # Unique VM ID
+    template_vm_id = 9000                 # Numeric VM ID of the Cloud-Init template
+    role           = "control-plane"      # "control-plane" or "worker"
+    cores          = 2                    # CPU cores
+    memory         = 4096                 # RAM in MB
+    disk_size      = 30                   # Disk size in GB
+    ip_address     = "192.168.1.160/24"   # Static IP with CIDR
+    gateway        = "192.168.1.1"        # Default gateway
   }
 
-  "vm-name-2" = {
-    vmid       = 101
-    clone_from = "debian-13-cloudinit"
-    cores      = 4
-    memory     = 8192
-    disk_size  = 100
-    ip_address = "192.168.1.101/24"
-    gateway    = "192.168.1.1"
+  "k3s-worker-01" = {
+    vmid           = 511
+    template_vm_id = 9000
+    role           = "worker"
+    cores          = 2
+    memory         = 6144
+    disk_size      = 40
+    ip_address     = "192.168.1.161/24"
+    gateway        = "192.168.1.1"
+  }
+
+  "k3s-worker-02" = {
+    vmid           = 512
+    template_vm_id = 9000
+    role           = "worker"
+    cores          = 2
+    memory         = 6144
+    disk_size      = 40
+    ip_address     = "192.168.1.162/24"
+    gateway        = "192.168.1.1"
   }
 }
 ```
 
-### Example: Real-World Deployment
-
-```hcl
-vms = {
-  "web-server" = {
-    vmid       = 100
-    clone_from = "debian-13-cloudinit"
-    cores      = 2
-    memory     = 2048      # 2 GB
-    disk_size  = 32
-    ip_address = "192.168.1.100/24"
-    gateway    = "192.168.1.1"
-  }
-
-  "database-server" = {
-    vmid       = 101
-    clone_from = "debian-13-cloudinit"
-    cores      = 4
-    memory     = 8192      # 8 GB
-    disk_size  = 100
-    ip_address = "192.168.1.101/24"
-    gateway    = "192.168.1.1"
-  }
-
-  "cache-server" = {
-    vmid       = 102
-    clone_from = "debian-13-cloudinit"
-    cores      = 2
-    memory     = 4096      # 4 GB
-    disk_size  = 50
-    ip_address = "192.168.1.102/24"
-    gateway    = "192.168.1.1"
-  }
-}
-```
+> Find your template's numeric VM ID on the Proxmox host with `qm list | grep <template-name>`.
 
 ## File Structure
 
@@ -189,22 +169,44 @@ After applying, Terraform outputs:
 
 ```
 vm_ids = {
-  "Terra-debian-database"  = 501
-  "Terra-debian-webserver" = 500
+  "k3s-cp-01"     = 510
+  "k3s-worker-01" = 511
+  "k3s-worker-02" = 512
 }
 
 vm_ip_addresses = {
-  "Terra-debian-database"  = "192.168.1.151/24"
-  "Terra-debian-webserver" = "192.168.1.150/24"
+  "k3s-cp-01"     = "192.168.1.160/24"
+  "k3s-worker-01" = "192.168.1.161/24"
+  "k3s-worker-02" = "192.168.1.162/24"
+}
+
+control_plane_nodes = {
+  "k3s-cp-01" = {
+    ip_address = "192.168.1.160/24"
+    vmid       = 510
+  }
+}
+
+worker_nodes = {
+  "k3s-worker-01" = {
+    ip_address = "192.168.1.161/24"
+    vmid       = 511
+  }
+  "k3s-worker-02" = {
+    ip_address = "192.168.1.162/24"
+    vmid       = 512
+  }
 }
 ```
 
+An Ansible inventory is also generated at `ansible/inventories/production/hosts.ini` with `[control_plane]` and `[workers]` groups, ready for a K3s installation playbook.
+
 ## SSH Access
 
-Once VMs are deployed, SSH into them:
+Once VMs are deployed, SSH into them (cloud-init provisions the `matt` user with your injected public key):
 
 ```bash
-ssh -i ~/.ssh/id_rsa.pub debian@192.168.1.100
+ssh -i ~/.ssh/id_ed25519 matt@192.168.1.160
 ```
 
 ## Troubleshooting
@@ -215,15 +217,15 @@ ssh -i ~/.ssh/id_rsa.pub debian@192.168.1.100
 - Go to **Datacenter → Permissions → API Tokens**
 - Edit your token and enable: `VM.Monitor`, `VM.Allocate`, `VM.Clone`, `VM.Config.*`, `VM.PowerMgmt`
 
-### Error: "clone_from template not found"
+### Error: "template not found" / clone fails
 
-**Solution:** Verify the template name exists in Proxmox:
+**Solution:** Verify the template's numeric VM ID in Proxmox:
 ```bash
 # In Proxmox shell
 qm list | grep debian
 ```
 
-Update `clone_from` in your `terraform.tfvars` to match the actual template name.
+Update `template_vm_id` in your `terraform.tfvars` to match the actual template's numeric VM ID (not its name).
 
 ### VMs created but no IP assigned
 
@@ -239,25 +241,28 @@ cloud-init --version
 
 ## Advanced Usage
 
-### Add a New VM
+### Add a New Worker Node
 
-Simply add a new entry to the `vms` map in `terraform.tfvars`:
+Simply add a new entry to the `vms` map in `terraform.tfvars` with `role = "worker"`:
 
 ```hcl
 vms = {
-  # ... existing VMs ...
-  
-  "new-server" = {
-    vmid       = 103
-    clone_from = "debian-13-cloudinit"
-    cores      = 2
-    memory     = 2048
-    disk_size  = 32
-    ip_address = "192.168.1.103/24"
-    gateway    = "192.168.1.1"
+  # ... existing nodes ...
+
+  "k3s-worker-03" = {
+    vmid           = 513
+    template_vm_id = 9000
+    role           = "worker"
+    cores          = 2
+    memory         = 6144
+    disk_size      = 40
+    ip_address     = "192.168.1.163/24"
+    gateway        = "192.168.1.1"
   }
 }
 ```
+
+Note: only one node may have `role = "control-plane"` — the variable validation will reject a second one.
 
 Then run:
 ```bash
@@ -301,13 +306,14 @@ terraform apply
 
 **Location:** `modules/ubuntu-vm/`
 
-**Purpose:** Encapsulates the creation of a single Proxmox VM with Cloud-Init support.
+**Purpose:** Encapsulates the creation of a single Proxmox VM with Cloud-Init support and the QEMU guest agent enabled, tagged by K3s role.
 
 **Inputs:**
 - `name` - VM display name
 - `vmid` - Unique VM ID
 - `node_name` - Proxmox node name
-- `clone_from` - Template name to clone
+- `template_vm_id` - Numeric VM ID of the Cloud-Init template to clone
+- `role` - `"control-plane"` or `"worker"` (used for tags and inventory grouping)
 - `cores` - CPU cores
 - `memory` - RAM in MB
 - `disk_size` - Disk size in GB
@@ -320,6 +326,7 @@ terraform apply
 - `vmid` - Created VM ID
 - `name` - VM name
 - `ip_address` - Configured IP address
+- `role` - K3s role of the node
 
 ## Contributing
 
