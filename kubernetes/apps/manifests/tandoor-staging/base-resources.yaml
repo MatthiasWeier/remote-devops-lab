@@ -1,0 +1,210 @@
+# A deliberate COPY of ../tandoor/tandoor.yaml's resources, not a live
+# `resources: - ../tandoor/tandoor.yaml` reference. That would be the more
+# obviously-DRY choice, but ArgoCD's bundled kustomize build applies the same
+# default LoadRestrictionsRootOnly security policy as `kubectl kustomize`,
+# which REJECTS any resource path that resolves outside this directory's own
+# root - confirmed locally: `kubectl kustomize` on a `../tandoor/tandoor.yaml`
+# reference fails with "file ... is not in or below ...: must build at
+# directory". Making it work would mean patching the shared argocd-cm
+# ConfigMap (`kustomize.buildOptions: "--load-restrictor LoadRestrictionsNone"`),
+# a cluster-wide change affecting every other Application's kustomize
+# behavior - not something a "zero-risk" staging epic should be the reason
+# for touching. A local, self-contained copy has zero blast radius instead,
+# at the cost of needing a manual re-copy here if prod's resource shapes
+# (not just tags/config, the actual object structure) ever change.
+#
+# If you'd rather have true single-source-of-truth basing and are fine with
+# the argocd-cm change, that's a legitimate alternative - just know it's a
+# cluster-wide opt-in, not scoped to this app.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tandoor-postgres-data
+  namespace: tandoor
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tandoor-media
+  namespace: tandoor
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tandoor-static
+  namespace: tandoor
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 2Gi
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tandoor-postgres
+  namespace: tandoor
+spec:
+  serviceName: tandoor-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tandoor-postgres
+  template:
+    metadata:
+      labels:
+        app: tandoor-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          env:
+            - name: POSTGRES_DB
+              value: tandoor
+            - name: POSTGRES_USER
+              value: tandoor
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tandoor-secrets
+                  key: POSTGRES_PASSWORD
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+              subPath: postgres
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: tandoor-postgres-data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tandoor-postgres
+  namespace: tandoor
+spec:
+  selector:
+    app: tandoor-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tandoor
+  namespace: tandoor
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: tandoor
+  template:
+    metadata:
+      labels:
+        app: tandoor
+    spec:
+      containers:
+        - name: tandoor
+          image: vabene1111/recipes:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tandoor-secrets
+                  key: SECRET_KEY
+            - name: DB_ENGINE
+              value: django.db.backends.postgresql
+            - name: POSTGRES_HOST
+              value: tandoor-postgres
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_USER
+              value: tandoor
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tandoor-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              value: tandoor
+            - name: ALLOWED_HOSTS
+              value: "tandoor.matt-host.de"
+            - name: TANDOOR_PORT
+              value: "8080"
+          volumeMounts:
+            - name: media
+              mountPath: /opt/recipes/mediafiles
+            - name: static
+              mountPath: /opt/recipes/staticfiles
+      volumes:
+        - name: media
+          persistentVolumeClaim:
+            claimName: tandoor-media
+        - name: static
+          persistentVolumeClaim:
+            claimName: tandoor-static
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tandoor
+  namespace: tandoor
+spec:
+  selector:
+    app: tandoor
+  ports:
+    - port: 80
+      targetPort: 8080
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tandoor
+  namespace: tandoor
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - tandoor.matt-host.de
+      secretName: tandoor-tls
+  rules:
+    - host: tandoor.matt-host.de
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tandoor
+                port:
+                  number: 80

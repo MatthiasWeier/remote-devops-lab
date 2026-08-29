@@ -1,0 +1,28 @@
+# Raw manifests - see kubernetes/apps/manifests/longhorn-ui/. Namespace is
+# NOT auto-created (no CreateNamespace) because longhorn-system already
+# exists from the out-of-band `helm install` that deployed Longhorn itself;
+# this Application only adds the UI Ingress/Middleware and the backup-target
+# Settings on top of that already-running install.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: longhorn-ui
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/MatthiasWeier/remote-devops-lab.git
+    targetRevision: main
+    path: kubernetes/apps/manifests/longhorn-ui
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: longhorn-system
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

@@ -34,6 +34,13 @@ module "ubuntu_vm" {
   # in state - file() reads bytes exactly, and a stray newline is otherwise
   # invisible but reads as a changed key to Terraform.
   ssh_keys = [trimspace(file(var.ssh_public_key_path))]
+
+  # See firewall.tf - the security group + rules are attached at the VM level
+  # via proxmox_virtual_environment_firewall_options, keyed off this same
+  # module.ubuntu_vm[each.key] instance. Enabling it here only arms the NIC
+  # to evaluate rules; it does nothing until firewall.tf's per-VM options
+  # resource + the one-time Datacenter toggle are both also in place.
+  firewall_enabled = true
 }
 
 # Split K3s nodes into control_plane and workers by their explicit role

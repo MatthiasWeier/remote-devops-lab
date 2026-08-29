@@ -1,0 +1,33 @@
+# Kustomize overlay - see kubernetes/apps/manifests/tandoor-staging/ for the
+# full isolation/data-sync workflow explanation. ArgoCD auto-detects the
+# Kustomize tool from the presence of kustomization.yaml in the target path,
+# no explicit `source.kustomize:` block needed.
+#
+# Completely independent of the production `tandoor` Application - separate
+# namespace, separate PVCs, separate Secret. Deleting this Application (or
+# this whole directory) has zero effect on production Tandoor.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tandoor-staging
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/MatthiasWeier/remote-devops-lab.git
+    targetRevision: main
+    path: kubernetes/apps/manifests/tandoor-staging
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tandoor-staging
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

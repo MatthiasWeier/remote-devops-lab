@@ -1,0 +1,84 @@
+# Staging overlay for Tandoor. Resources come from base-resources.yaml in
+# THIS SAME directory - a deliberate copy of ../tandoor/tandoor.yaml, not a
+# live cross-directory reference. See base-resources.yaml's top comment for
+# why (ArgoCD's kustomize build rejects `../` resource paths by default;
+# working around that means a cluster-wide argocd-cm change, which a
+# zero-risk staging epic shouldn't be the reason to make). Either way,
+# production's tandoor.yaml/Application are completely untouched by
+# anything in this directory.
+#
+# Isolation strategy: the `namespace:` override below is what actually makes
+# this safe, not resource renaming. A PVC/StatefulSet/Deployment named
+# `tandoor-media` in namespace `tandoor-staging` is a completely distinct
+# Kubernetes object from the one named `tandoor-media` in namespace
+# `tandoor` - there is no code path by which this overlay can mount or write
+# to a production volume. Names are deliberately left UNCHANGED (no
+# namePrefix) specifically so that in-namespace references that are opaque
+# strings to Kustomize - env vars like POSTGRES_HOST: tandoor-postgres, or
+# secretKeyRef.name: tandoor-secrets - keep resolving correctly without
+# needing a patch for every single one of them. Kubernetes DNS and Secret
+# lookups are namespace-scoped, so `tandoor-postgres` inside tandoor-staging
+# resolves to THIS namespace's own Service, never prod's.
+#
+# Defaults to replicas: 0 (see patch-deployment.yaml) - an always-on staging
+# copy competes for the same limited RAM/CPU as production on this homelab's
+# two workers. Scale it up only when you're actually testing something:
+#   kubectl -n tandoor-staging scale deployment/tandoor --replicas=1
+#
+# PREREQUISITE - same out-of-band secret pattern as prod, own Secret in the
+# staging namespace (reuses the SAME key names as tandoor.yaml expects,
+# since env var names are unchanged):
+#   kubectl create namespace tandoor-staging
+#   kubectl create secret generic tandoor-secrets -n tandoor-staging \
+#     --from-literal=SECRET_KEY="$(openssl rand -base64 48)" \
+#     --from-literal=POSTGRES_PASSWORD="$(openssl rand -base64 32)"
+#
+# DATA-SYNC WORKFLOW (testing a risky prod DB migration against real data) -
+# this is inherently a manual, operator-triggered action, not something
+# ArgoCD/GitOps can express declaratively, since "clone real prod data on
+# demand" has no meaningful git-committed desired state:
+#   1. Confirm Longhorn's snapshot VolumeSnapshotClass name:
+#        kubectl get volumesnapshotclass
+#   2. Snapshot prod's postgres PVC:
+#        kubectl apply -f - <<'EOF'
+#        apiVersion: snapshot.storage.k8s.io/v1
+#        kind: VolumeSnapshot
+#        metadata:
+#          name: tandoor-postgres-data-clone-src
+#          namespace: tandoor
+#        spec:
+#          volumeSnapshotClassName: longhorn   # verify against step 1's output
+#          source:
+#            persistentVolumeClaimName: tandoor-postgres-data
+#        EOF
+#      VolumeSnapshot objects are namespace-scoped to the SOURCE PVC's
+#      namespace (tandoor) - the clone PVC in the next step can still
+#      reference it cross-namespace via Longhorn's backing snapshot, but the
+#      simplest path is a one-off manual export/import via `pg_dump`/`pg_restore`
+#      through a `kubectl exec` into the prod pod if cross-namespace snapshot
+#      cloning isn't set up in your Longhorn version - check
+#      `kubectl explain volumesnapshot.spec.source` for what your version supports.
+#   3. Scale staging down first (kubectl -n tandoor-staging scale
+#      deployment/tandoor --replicas=0), then restore the dump/clone into
+#      staging's own tandoor-postgres-data PVC (which is 3Gi by default here -
+#      bump patch-pvc-postgres.yaml first if prod's real data exceeds that).
+#   4. Scale staging back up, test the migration against real data.
+#   5. Discard: `kubectl -n tandoor-staging delete pvc tandoor-postgres-data`
+#      and let ArgoCD recreate a fresh empty one on next sync.
+#   6. Only once the migration is verified against real data does it belong
+#      in a git commit bumping the production image tag in tandoor.yaml.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tandoor-staging
+
+resources:
+  - base-resources.yaml
+
+patches:
+  - path: patch-ingress.yaml
+  - path: patch-deployment.yaml
+  - path: patch-pvc-postgres.yaml
+  - path: patch-pvc-media.yaml
+  - path: patch-pvc-static.yaml

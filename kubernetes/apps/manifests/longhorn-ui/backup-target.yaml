@@ -1,0 +1,58 @@
+# Configures Longhorn's off-cluster backup target.
+#
+# IMPORTANT: Longhorn in this cluster was installed directly via `helm
+# install` (out-of-band, not an ArgoCD Application - there's no
+# kubernetes/apps/longhorn.yaml in this repo). That means a
+# `defaultSettings.backupTarget` Helm value only takes effect on a FRESH
+# install; it will NOT retroactively change a live setting. The two Setting
+# custom resources below ARE how you change it live, and Longhorn's own
+# controller reconciles them continuously - this file is the actual
+# source of truth going forward, not a Helm values block.
+#
+# For documentation/parity, if you ever do a from-scratch reinstall, the
+# equivalent Helm values are:
+#   defaultSettings:
+#     backupTarget: "s3://backup-bucket@eu-central-1/"   # or nfs://... below
+#     backupTargetCredentialSecret: "longhorn-backup-secret"
+#
+# --- Choose ONE backupTarget value below and comment out the other ---
+#
+# NFS example - point at a share on your NAS. No credential Secret needed
+# for NFS (auth, if any, is handled at the NFS server/export level):
+#   nfs://192.168.178.10:/volume1/backups
+#
+# S3 example - any S3-compatible endpoint (AWS, MinIO, Backblaze B2 via its
+# S3-compatible API, etc.). Format is s3://<bucket>@<region>/<optional-path>:
+#   s3://backup-bucket@eu-central-1/
+# For a non-AWS S3-compatible endpoint, also set AWS_ENDPOINTS in the
+# Secret below (Longhorn reads it from the same credential secret).
+apiVersion: longhorn.io/v1beta2
+kind: Setting
+metadata:
+  name: backup-target
+  namespace: longhorn-system
+value: "s3://backup-bucket@eu-central-1/"
+
+---
+# Only required for the S3 path above - omit/delete this Setting entirely if
+# using the NFS target, since NFS has no credential secret to reference.
+apiVersion: longhorn.io/v1beta2
+kind: Setting
+metadata:
+  name: backup-target-credential-secret
+  namespace: longhorn-system
+value: "longhorn-backup-secret"
+
+---
+# The Secret itself is NOT defined here (real access keys, same
+# out-of-band-secret pattern as the rest of this repo). Create it once
+# before the Setting above can resolve successfully:
+#   kubectl create secret generic longhorn-backup-secret -n longhorn-system \
+#     --from-literal=AWS_ACCESS_KEY_ID="<your-access-key>" \
+#     --from-literal=AWS_SECRET_ACCESS_KEY="<your-secret-key>" \
+#     --from-literal=AWS_ENDPOINTS="https://your-s3-endpoint"   # omit for real AWS S3
+#
+# PREREQUISITE this file cannot satisfy for you: an actual NFS share or S3
+# bucket has to exist somewhere off this cluster first. Nothing in this repo
+# provisions one - that's infrastructure outside K3s/Terraform's scope here
+# (a NAS export, or a cloud storage bucket you create separately).

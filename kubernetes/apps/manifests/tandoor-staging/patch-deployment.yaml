@@ -1,0 +1,18 @@
+# Scaled to 0 by default (see kustomization.yaml's top comment) and
+# ALLOWED_HOSTS overridden to the staging domain - relies on the
+# containers[].env strategic-merge key (`name`) to patch just this one env
+# var without needing to restate the whole env list from tandoor.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tandoor
+  namespace: tandoor
+spec:
+  replicas: 0
+  template:
+    spec:
+      containers:
+        - name: tandoor
+          env:
+            - name: ALLOWED_HOSTS
+              value: "staging-tandoor.matt-host.de"

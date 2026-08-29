@@ -1,0 +1,28 @@
+# IPAddressPool + L2Advertisement - the CRDs these use only exist once the
+# metallb Application (kubernetes/apps/metallb.yaml) has synced and its CRDs
+# are Established. See that file's top comment for why this is a separate
+# Application rather than a sync-wave within one.
+#
+# .200-.205 is a small range carved out of the LAN subnet, OUTSIDE the
+# router's DHCP pool - confirm this before first apply (check your router's
+# DHCP range setting) or MetalLB and the router's own DHCP server will
+# eventually hand out the same IP to two different things.
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: k3s-lb-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 192.168.178.200-192.168.178.205
+  autoAssign: true
+
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: k3s-l2-adv
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - k3s-lb-pool

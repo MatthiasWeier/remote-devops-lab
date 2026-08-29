@@ -68,3 +68,16 @@ variable "network_bridge" {
   type        = string
   default     = "vmbr0"
 }
+
+# Firewall settings (see firewall.tf)
+variable "management_cidr" {
+  description = <<-EOT
+    The trusted LAN subnet allowed to reach SSH (22), the K3s API (6443), and
+    (implicitly, since it's inside this same CIDR) the router doing the actual
+    80/443 port-forward. Deliberately a single flat /24 rather than a narrower
+    management-only range - this is a home LAN, not a segmented office network,
+    and splitting it further would just be rules to maintain for no real gain.
+  EOT
+  type        = string
+  default     = "192.168.178.0/24"
+}

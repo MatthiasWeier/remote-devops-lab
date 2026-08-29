@@ -1,0 +1,10 @@
+# Downsized from prod's 20Gi.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tandoor-media
+  namespace: tandoor
+spec:
+  resources:
+    requests:
+      storage: 5Gi

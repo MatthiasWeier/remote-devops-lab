@@ -1,0 +1,58 @@
+# Exposes the Longhorn UI at longhorn.matt-host.de. The UI ships with ZERO
+# built-in authentication - it can detach volumes, delete replicas, and wipe
+# backups from a browser with no login prompt. The Traefik BasicAuth
+# Middleware below is not optional hardening, it's the only thing standing
+# between the internet and destructive volume operations. Do not remove it
+# to "simplify" this.
+#
+# The htpasswd Secret is deliberately NOT defined here - same selfHeal
+# reasoning as every other app secret in this repo (tandoor.yaml,
+# bookstack.yaml): syncPolicy.automated.selfHeal would keep reverting any
+# real credential back to whatever's committed to git. Create it once, out
+# of band, before first sync:
+#   htpasswd -nbB <username> '<password>' | tee longhorn-htpasswd
+#   kubectl create secret generic longhorn-basic-auth -n longhorn-system \
+#     --from-file=users=longhorn-htpasswd
+#   rm longhorn-htpasswd   # don't leave the plaintext-adjacent htpasswd file lying around
+#
+# If the Middleware CRD's apiVersion below doesn't exist in your cluster,
+# check which Traefik CRD group K3s shipped:
+#   kubectl get crd | grep -i traefik
+# Older K3s versions (Traefik v2) use traefik.containo.us/v1alpha1 instead.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: longhorn-basic-auth
+  namespace: longhorn-system
+spec:
+  basicAuth:
+    secret: longhorn-basic-auth
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: longhorn-ui
+  namespace: longhorn-system
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Namespace-prefixed per Traefik's cross-namespace reference format:
+    # <namespace>-<middleware-name>@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: longhorn-system-longhorn-basic-auth@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - longhorn.matt-host.de
+      secretName: longhorn-ui-tls
+  rules:
+    - host: longhorn.matt-host.de
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: longhorn-frontend
+                port:
+                  number: 80

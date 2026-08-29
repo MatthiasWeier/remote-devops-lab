@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tandoor
+  namespace: tandoor
+spec:
+  tls:
+    - hosts:
+        - staging-tandoor.matt-host.de
+      secretName: staging-tandoor-tls
+  rules:
+    - host: staging-tandoor.matt-host.de
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tandoor
+                port:
+                  number: 80

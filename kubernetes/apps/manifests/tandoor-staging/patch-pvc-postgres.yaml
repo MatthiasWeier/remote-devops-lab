@@ -1,0 +1,12 @@
+# Downsized from prod's 10Gi - staging doesn't need production-scale
+# capacity by default. Bump this before a real data-sync (see
+# kustomization.yaml's DATA-SYNC WORKFLOW) if prod's actual usage exceeds it.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tandoor-postgres-data
+  namespace: tandoor
+spec:
+  resources:
+    requests:
+      storage: 3Gi

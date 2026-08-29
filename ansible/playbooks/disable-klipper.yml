@@ -1,0 +1,73 @@
+---
+# Disables K3s's built-in Klipper (servicelb) LoadBalancer controller so
+# MetalLB can claim `type: LoadBalancer` Services without both controllers
+# fighting to write the same Service's .status.loadBalancer.ingress field.
+#
+# Klipper is disabled via /etc/rancher/k3s/config.yaml's `disable:` list, not
+# by touching the k3s systemd unit's ExecStart args - K3s reads this file on
+# every start/restart, so it survives K3s upgrades that regenerate the
+# systemd unit, and it's a much smaller, more reviewable diff than templating
+# the unit file.
+#
+# Control-plane only: `disable: servicelb` is a K3s SERVER option and has no
+# meaning on agent (worker) nodes - servicelb only ever runs on server nodes
+# regardless.
+#
+# One-shot ad-hoc equivalent, if you'd rather not run the full playbook:
+#   ansible control_plane -i ansible/inventories/production/hosts.ini -b \
+#     -m ansible.builtin.lineinfile \
+#     -a "path=/etc/rancher/k3s/config.yaml line='disable: servicelb' create=yes"
+#   ansible control_plane -i ansible/inventories/production/hosts.ini -b \
+#     -m ansible.builtin.systemd -a "name=k3s state=restarted"
+#
+# Run BEFORE syncing the metallb ArgoCD Application (see
+# kubernetes/apps/metallb.yaml) - otherwise Klipper re-claims the Traefik
+# Service's LoadBalancer status the moment MetalLB releases it, or the two
+# just alternate ownership indefinitely.
+
+- name: Disable K3s's built-in Klipper service load balancer
+  hosts: control_plane
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: Ensure /etc/rancher/k3s directory exists
+      file:
+        path: /etc/rancher/k3s
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Ensure config.yaml disables servicelb
+      lineinfile:
+        path: /etc/rancher/k3s/config.yaml
+        line: "disable: servicelb"
+        create: yes
+        owner: root
+        group: root
+        mode: "0644"
+      register: klipper_config
+
+    - name: Restart k3s to apply
+      systemd:
+        name: k3s
+        state: restarted
+      when: klipper_config.changed
+
+    - name: Wait for the API server to come back
+      wait_for:
+        host: "{{ ansible_host }}"
+        port: 6443
+        timeout: 120
+      when: klipper_config.changed
+
+    - name: Confirm servicelb's daemonset is gone (may take a few seconds after restart)
+      command: kubectl get daemonset -n kube-system svclb-traefik --ignore-not-found -o name
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: svclb_check
+      changed_when: false
+      retries: 6
+      delay: 10
+      until: svclb_check.stdout == ""

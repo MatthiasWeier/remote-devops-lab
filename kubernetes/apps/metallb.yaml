@@ -1,0 +1,60 @@
+# MetalLB controller/speaker - provides a real LoadBalancer IP on this flat
+# L2 network where the router can't do BGP and Klipper (K3s's built-in LB)
+# is a single point of failure tied to whichever one node the router happens
+# to forward to.
+#
+# Split into two Applications (this one + metallb-config.yaml), same pattern
+# already used for immich/immich-postgres in this repo: the IPAddressPool
+# and L2Advertisement CRDs in metallb-config.yaml don't exist until this
+# chart has synced and its CRDs are established, and a single Application
+# with sync-wave annotations does NOT reliably block on CRD establishment
+# between waves (confirmed the hard way with kube-prometheus-stack's CRDs -
+# see that Application's comments). Splitting into two Applications with
+# metallb-config's retry/backoff (below) self-heals once the CRDs land,
+# without needing manual wave-blocking logic.
+#
+# PREREQUISITE - run before first sync:
+#   ansible-playbook -i ansible/inventories/production/hosts.ini \
+#     ansible/playbooks/disable-klipper.yml
+# Otherwise Klipper and MetalLB fight over the same Service's LoadBalancer
+# status.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: metallb
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://metallb.github.io/metallb
+    chart: metallb
+    # Pin explicit, same reasoning as every other chart in this repo - check
+    # for newer releases with:
+    #   helm repo add metallb https://metallb.github.io/metallb
+    #   helm search repo metallb/metallb --versions
+    targetRevision: 0.14.9
+    helm:
+      values: |
+        speaker:
+          # MetalLB's speaker needs to send raw ARP frames from the host
+          # network namespace to announce the VIP - this is unrelated to
+          # (and unaffected by) the Proxmox VM-level firewall in
+          # terraform/proxmox/firewall.tf, which filters at the vNIC/hypervisor
+          # level, not inside the guest's own network stack.
+          tolerateMaster: true
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: metallb-system
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -82,3 +82,16 @@ variable "ssh_keys" {
   type        = list(string)
   default     = []
 }
+
+# Firewall settings
+variable "firewall_enabled" {
+  description = <<-EOT
+    Enables the Proxmox per-NIC firewall (network_device.firewall) for this VM.
+    This alone does nothing until the security group + rules in firewall.tf are
+    attached at the root module, and until the Datacenter-level firewall
+    subsystem is switched on (a one-time manual step - see firewall.tf's
+    top-of-file comment for why that toggle is deliberately not Terraform-managed).
+  EOT
+  type        = bool
+  default     = false
+}

@@ -1,0 +1,53 @@
+# See kubernetes/apps/metallb.yaml for why this is a separate Application.
+#
+# FIRST SYNC ORDER (manual, one-time - same pattern already used for
+# cluster-issuers.yaml in this repo):
+#   1. Sync metallb, wait for it to report Healthy:
+#        kubectl -n argocd get application metallb -w
+#   2. Sync this Application. If it lands before the CRDs are fully
+#      Established it'll fail that attempt - the retry policy below handles
+#      that automatically, no manual intervention needed, it just takes a
+#      couple of minutes to settle.
+#
+# AFTER this syncs, Traefik's Service (type LoadBalancer, in kube-system)
+# gets a real external IP from the pool instead of relying on Klipper's
+# per-node behavior:
+#   kubectl get svc -n kube-system traefik
+# Take that IP (one of .200-.205) and repoint your router's 80/443
+# port-forward at it INSTEAD OF a specific node's IP. This is the actual HA
+# win: that IP now fails over between nodes via MetalLB's leader election
+# instead of being pinned to whichever single node you forwarded to before.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: metallb-config
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/MatthiasWeier/remote-devops-lab.git
+    targetRevision: main
+    path: kubernetes/apps/manifests/metallb-config
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: metallb-system
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    # Bridges the CRD-establishment race described above - ArgoCD keeps
+    # retrying with backoff instead of sitting in a failed/degraded state
+    # waiting for a manual re-sync.
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
