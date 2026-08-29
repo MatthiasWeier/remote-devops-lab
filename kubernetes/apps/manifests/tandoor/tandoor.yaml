@@ -1,9 +1,11 @@
 # Standard Kubernetes deployment for Tandoor Recipes.
 # Image: vabene1111/recipes (Tandoor's official Docker Hub image).
-# Verify current tag before first sync: https://hub.docker.com/r/vabene1111/recipes/tags
+# Pinned to a specific version (not :latest) - see
+# https://hub.docker.com/r/vabene1111/recipes/tags for newer releases, or
+# let Renovate (renovate.json) open a PR automatically when one exists.
 # Env var names below match Tandoor's documented Docker env config as of
 # this writing - double check against current docs if the app fails to
-# start after `latest` moves on.
+# start after upgrading.
 #
 # `tandoor-secrets` is now GitOps-managed via Sealed Secrets - see
 # sealed-secrets.yaml in this same directory. Same reasoning as
@@ -94,6 +96,16 @@ spec:
                 secretKeyRef:
                   name: tandoor-secrets
                   key: POSTGRES_PASSWORD
+          # Observed live usage ~48Mi at rest (2026-08-29) - request covers
+          # that with headroom, limit leaves room to grow with more recipes
+          # without starving other pods on the same node.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
           ports:
             - containerPort: 5432
           volumeMounts:
@@ -143,7 +155,7 @@ spec:
     spec:
       containers:
         - name: tandoor
-          image: vabene1111/recipes:latest
+          image: vabene1111/recipes:2.6.13
           ports:
             - containerPort: 8080
           env:
@@ -171,6 +183,17 @@ spec:
               value: "tandoor.matt-host.de"
             - name: TANDOOR_PORT
               value: "8080"
+          # Observed live usage ~818Mi (2026-08-29, likely image/thumbnail
+          # processing) - request set below that peak on purpose (it's not
+          # sustained), limit gives real headroom above it rather than
+          # OOMKilling on the next big recipe import.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1536Mi
           volumeMounts:
             - name: media
               mountPath: /opt/recipes/mediafiles

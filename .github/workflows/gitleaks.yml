@@ -1,0 +1,26 @@
+# Scans every push/PR for accidentally-committed secrets. Added after a
+# real incident (docs/01-setup-and-runbook.md, bug 32): an earlier commit
+# briefly contained a real ntfy.sh topic name in plaintext in a public repo.
+# This would have been caught automatically before ever reaching GitHub.
+#
+# gitleaks-action is free for repos under a personal GitHub account (no
+# GITLEAKS_LICENSE needed) - only organization-owned repos require a paid
+# license. Verify this is still the case before adding this to an org repo.
+name: gitleaks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

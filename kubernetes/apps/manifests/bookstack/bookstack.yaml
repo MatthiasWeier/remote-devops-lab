@@ -2,8 +2,11 @@
 # App image: lscr.io/linuxserver/bookstack (LinuxServer.io's maintained image).
 # DB image: mariadb:11 (official) - BookStack is a Laravel/PHP app and needs
 # MySQL/MariaDB, not Postgres.
-# Verify current tags before first sync:
-#   https://docs.linuxserver.io/images/docker-bookstack/
+# Pinned to a specific version (not :latest) - bug 29 in
+# docs/01-setup-and-runbook.md was directly caused by an unpinned :latest
+# pull silently changing image behavior. Check
+# https://docs.linuxserver.io/images/docker-bookstack/ for newer releases,
+# or let Renovate (renovate.json) open a PR automatically.
 #
 # The `bookstack-secrets` Secret is deliberately NOT defined here - same
 # selfHeal reasoning as tandoor.yaml. Create it once, out of band, before
@@ -75,6 +78,15 @@ spec:
                 secretKeyRef:
                   name: bookstack-secrets
                   key: MYSQL_PASSWORD
+          # Observed live usage ~184Mi (2026-08-29) - headroom for MariaDB's
+          # buffer pool to grow as the wiki's content grows.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 768Mi
           ports:
             - containerPort: 3306
           volumeMounts:
@@ -120,7 +132,7 @@ spec:
     spec:
       containers:
         - name: bookstack
-          image: lscr.io/linuxserver/bookstack:latest
+          image: lscr.io/linuxserver/bookstack:26.05.3
           ports:
             - containerPort: 80
           env:
@@ -175,6 +187,14 @@ spec:
                   key: MYSQL_PASSWORD
             - name: DB_DATABASE
               value: bookstack
+          # Observed live usage ~65Mi (2026-08-29).
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
           volumeMounts:
             - name: uploads
               mountPath: /config
