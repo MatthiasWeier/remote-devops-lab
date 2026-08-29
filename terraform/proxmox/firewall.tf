@@ -151,6 +151,24 @@ resource "proxmox_virtual_environment_cluster_firewall_security_group" "k3s_dmz"
     }
   }
 
+  # Narrow, deliberate exception - NOT a blanket LAN bypass. Added after
+  # prometheus-pve-exporter (running in-cluster, polling the Proxmox API
+  # remotely for host/VM metrics) hit exactly the lateral-movement DROP rule
+  # below the moment the Datacenter firewall was actually switched on -
+  # confirmed live via a ConnectTimeout in the exporter's own logs. The
+  # Proxmox host was never in the node-mesh ALLOW above because it isn't a
+  # K3s node; this rule is scoped to just the one port a legitimate
+  # in-cluster workload now needs.
+  rule {
+    type    = "out"
+    action  = "ACCEPT"
+    proto   = "tcp"
+    dport   = "8006"
+    dest    = "192.168.178.2"
+    log     = "nolog"
+    comment = "Proxmox API - prometheus-pve-exporter polling for host/VM metrics"
+  }
+
   rule {
     type    = "out"
     action  = "DROP"
@@ -204,6 +222,21 @@ resource "proxmox_virtual_environment_firewall_options" "k3s_vm_firewall" {
 # the two `rule` blocks below may need to collapse into one with `type`
 # omitted - check the provider's current examples at
 # https://github.com/bpg/terraform-provider-proxmox before changing this.
+#
+# PROVIDER QUIRK, confirmed live: the schema only accepts type="in"/"out"
+# when DECLARING a rule (a bare `terraform validate` rejects "group"
+# outright: "expected type to be one of [\"in\" \"out\"], got group") - but
+# the Proxmox API itself stores and reads back a group-insertion rule with
+# type="group" (confirmed via GET .../qemu/<vmid>/firewall/rules). That
+# mismatch is structural, not something fixable by picking a different
+# literal here. It's harmless on CREATE (Proxmox just accepts "in"/"out"
+# and stores "group" regardless - confirmed these rules work correctly
+# live), but it means every `terraform plan` sees permanent drift, and an
+# actual UPDATE attempt on these specific rules fails outright ("error:
+# unknown action 'k3s-dmz'", confirmed live - harmless in that it changes
+# nothing on Proxmox's side, but makes `terraform apply` exit non-zero).
+# `ignore_changes` stops Terraform from ever trying to "correct" this
+# resource post-creation - it's already correct, the drift is fake.
 resource "proxmox_virtual_environment_firewall_rules" "k3s_vm_group_membership" {
   for_each = var.vms
 
@@ -223,4 +256,8 @@ resource "proxmox_virtual_environment_firewall_rules" "k3s_vm_group_membership" 
   }
 
   depends_on = [proxmox_virtual_environment_firewall_options.k3s_vm_firewall]
+
+  lifecycle {
+    ignore_changes = [rule]
+  }
 }
