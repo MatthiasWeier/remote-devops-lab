@@ -5,16 +5,25 @@
 # this writing - double check against current docs if the app fails to
 # start after `latest` moves on.
 #
-# The `tandoor-secrets` Secret is deliberately NOT defined here. With
-# syncPolicy.automated.selfHeal: true, anything ArgoCD tracks in git it
-# will continuously re-apply - so a real secret patched onto a Secret this
-# manifest declared would keep getting reverted back to whatever's
-# committed. Instead, create it once, out of band, before first sync
-# (same pattern as immich.yaml's immich-postgres-secret):
-#   kubectl create namespace tandoor
+# `tandoor-secrets` is now GitOps-managed via Sealed Secrets - see
+# sealed-secrets.yaml in this same directory. Same reasoning as
+# longhorn-ui/ingress.yaml: a SealedSecret's ciphertext IS the real value, so
+# ArgoCD's selfHeal re-applying it is correct instead of the thing that used
+# to force this out-of-band in the first place.
+#
+# To rotate a value, reseal in a single remote SSH session on a cluster node
+# (never pipe secret material through a Windows shell - bug 27):
 #   kubectl create secret generic tandoor-secrets -n tandoor \
 #     --from-literal=SECRET_KEY="$(openssl rand -base64 48)" \
-#     --from-literal=POSTGRES_PASSWORD="$(openssl rand -base64 32)"
+#     --from-literal=POSTGRES_PASSWORD="$(openssl rand -base64 32)" \
+#     --dry-run=client -o yaml \
+#     | kubeseal --format yaml --cert <(kubeseal --fetch-cert) \
+#     > sealed-secrets.yaml
+# Rotating POSTGRES_PASSWORD this way is NOT enough by itself - the running
+# Postgres pod's actual user password on disk won't change just because the
+# Secret did (env vars are injected once at container start, same class of
+# gap as bug 21). You'd also need `ALTER USER tandoor PASSWORD ...` inside
+# the postgres pod and a rollout restart of both StatefulSet and Deployment.
 
 ---
 apiVersion: v1

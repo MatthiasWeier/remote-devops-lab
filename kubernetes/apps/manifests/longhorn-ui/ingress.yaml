@@ -5,15 +5,26 @@
 # between the internet and destructive volume operations. Do not remove it
 # to "simplify" this.
 #
-# The htpasswd Secret is deliberately NOT defined here - same selfHeal
-# reasoning as every other app secret in this repo (tandoor.yaml,
-# bookstack.yaml): syncPolicy.automated.selfHeal would keep reverting any
-# real credential back to whatever's committed to git. Create it once, out
-# of band, before first sync:
-#   htpasswd -nbB <username> '<password>' | tee longhorn-htpasswd
+# The htpasswd Secret is now GitOps-managed via Sealed Secrets (see
+# sealed-basic-auth.yaml in this same directory) instead of being created
+# out-of-band. This used to be a hard blocker: with syncPolicy.automated.
+# selfHeal, a Secret defined in git as a plaintext placeholder would get
+# continuously re-applied over any real credential. A SealedSecret sidesteps
+# that entirely - what's committed to git IS the real credential, just
+# asymmetrically encrypted, so selfHeal reverting to git is now correct
+# behavior instead of the thing that used to make this impossible.
+#
+# To rotate the credential:
+#   htpasswd -nbB <username> '<new-password>' > /tmp/longhorn-htpasswd
 #   kubectl create secret generic longhorn-basic-auth -n longhorn-system \
-#     --from-file=users=longhorn-htpasswd
-#   rm longhorn-htpasswd   # don't leave the plaintext-adjacent htpasswd file lying around
+#     --from-file=users=/tmp/longhorn-htpasswd --dry-run=client -o yaml \
+#     | kubeseal --format yaml --cert <(kubeseal --fetch-cert) \
+#     > sealed-basic-auth.yaml
+#   rm /tmp/longhorn-htpasswd
+# then commit sealed-basic-auth.yaml. Do this in one remote SSH session on a
+# cluster node, never piping the plaintext htpasswd file through a Windows
+# shell first (see docs/01-setup-and-runbook.md bug 27 - a BOM silently
+# corrupted a secret piped this way before).
 #
 # If the Middleware CRD's apiVersion below doesn't exist in your cluster,
 # check which Traefik CRD group K3s shipped:
