@@ -58,3 +58,10 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      # bgppeers.metallb.io's CRD is large enough to hit the same 256KiB
+      # last-applied-configuration annotation limit as kube-prometheus-stack's
+      # CRDs (see that Application's comments) - confirmed live: it stayed
+      # perpetually OutOfSync under client-side apply even though the sync
+      # itself reported success. Server-side apply avoids writing that
+      # annotation at all.
+      - ServerSideApply=true
