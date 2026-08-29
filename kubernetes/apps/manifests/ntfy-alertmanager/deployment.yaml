@@ -17,6 +17,14 @@ spec:
         - name: ntfy-alertmanager
           image: xenrox/ntfy-alertmanager:1.0.1
           args: ["--config", "/etc/ntfy-alertmanager/config"]
+          # Observed live usage ~7Mi (2026-08-29) - tiny static Go binary.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
           ports:
             - containerPort: 8080
           volumeMounts:
