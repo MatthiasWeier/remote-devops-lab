@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ntfy-alertmanager
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ntfy-alertmanager
+  template:
+    metadata:
+      labels:
+        app: ntfy-alertmanager
+    spec:
+      containers:
+        - name: ntfy-alertmanager
+          image: xenrox/ntfy-alertmanager:1.0.1
+          args: ["--config", "/etc/ntfy-alertmanager/config"]
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: config
+              mountPath: /etc/ntfy-alertmanager/config
+              subPath: config
+              readOnly: true
+      volumes:
+        # ntfy-alertmanager-config is a SealedSecret (see sealed-config.yaml)
+        # rather than a ConfigMap - the file it decrypts to contains the
+        # ntfy.sh topic name, which is a bearer credential on a public
+        # server (anyone who knows it can read or spoof-publish to it).
+        # This repo is public, so that can't sit in a plain ConfigMap.
+        - name: config
+          secret:
+            secretName: ntfy-alertmanager-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ntfy-alertmanager
+  namespace: monitoring
+spec:
+  selector:
+    app: ntfy-alertmanager
+  ports:
+    - port: 8080
+      targetPort: 8080

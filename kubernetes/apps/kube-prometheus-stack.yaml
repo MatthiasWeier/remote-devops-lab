@@ -53,6 +53,29 @@ spec:
                     requests:
                       storage: 5Gi
 
+          # Closes the "alerts fire into the void" gap: this chart's default
+          # config has no receiver wired up at all. `ntfy-alertmanager`
+          # (kubernetes/apps/ntfy-alertmanager.yaml) is a small bridge in the
+          # same `monitoring` namespace - Alertmanager's webhook_configs has
+          # no templating support of its own, so it can't reshape its fixed
+          # JSON payload into ntfy's title/priority/tags fields directly;
+          # the bridge does that translation. See docs/01-setup-and-runbook.md
+          # for the exact ntfy.sh topic to subscribe to.
+          config:
+            global:
+              resolve_timeout: 5m
+            route:
+              group_by: ['alertname', 'severity']
+              group_wait: 30s
+              group_interval: 5m
+              repeat_interval: 4h
+              receiver: 'ntfy'
+            receivers:
+              - name: 'ntfy'
+                webhook_configs:
+                  - url: 'http://ntfy-alertmanager.monitoring.svc.cluster.local:8080/'
+                    send_resolved: true
+
         grafana:
           persistence:
             enabled: true
