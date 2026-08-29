@@ -1,0 +1,32 @@
+# Same CRD-establishment race as metallb-config in this repo - ClusterPolicy
+# doesn't exist until kyverno.yaml has synced. The retry/backoff below lets
+# ArgoCD self-heal past that instead of sitting in a failed state waiting
+# for a manual re-sync.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno-policies
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/MatthiasWeier/remote-devops-lab.git
+    targetRevision: main
+    path: kubernetes/apps/manifests/kyverno-policies
+
+  destination:
+    server: https://kubernetes.default.svc
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
