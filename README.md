@@ -63,12 +63,12 @@ Focus: Stand up a self-hosted, GitOps-managed Kubernetes platform on bare-metal 
 
 ### Phase 6: Production Hardening & GitOps Maturity (Next Steps)
 Focus: close the gap between "it works" and "it's operable." Not yet implemented — a candidate list for what's next.
-- [ ] **App-of-Apps pattern:** ArgoCD isn't yet watching this Git repo directly — `kubernetes/apps/*.yaml` currently has to be applied manually with `kubectl apply -f`. A root `Application` pointed at `kubernetes/apps/` would make new apps auto-sync on `git push`.
+- [x] **App-of-Apps pattern:** `kubernetes/apps/root-app.yaml` now watches `kubernetes/apps/` (non-recursive) directly. Every future top-level `.yaml` under that directory is auto-registered on `git push` — no more one-time manual `kubectl apply -f` per app.
 - [ ] **Remote Terraform State:** `terraform.tfstate` is still local-only — no locking, no team-safety, no recovery if the machine running `terraform apply` is lost.
-- [ ] **Longhorn Backups:** No S3/NFS backup target is configured — losing more worker VMs than Longhorn's replica count would still mean real data loss.
-- [ ] **GitOps Secrets Management:** No Sealed Secrets / External Secrets Operator yet. Fine for `kube-prometheus-stack` (no secrets in its manifest), but a hard blocker for any future app that needs credentials managed through ArgoCD.
-- [ ] **CI Validation:** No pipeline runs `terraform validate`, `ansible-lint`, or a YAML/kubeconform check on pull requests — everything is currently caught by hand.
-- [ ] **Alerting:** `kube-prometheus-stack` ships with default alert rules, but Alertmanager has no configured receiver (Slack/Discord/email) — alerts currently fire into the void.
+- [ ] **Longhorn Backups:** No S3/NFS backup target is configured — losing more worker VMs than Longhorn's replica count would still mean real data loss. Blocked on NAS arrival.
+- [x] **GitOps Secrets Management:** Sealed Secrets controller deployed via ArgoCD; Longhorn UI's BasicAuth and Tandoor's DB credentials now live in git as `SealedSecret` objects, not created out-of-band. Immich's and BookStack's secrets are not yet migrated — see runbook.
+- [x] **CI Validation:** `.github/workflows/validate-gitops.yml` runs yamllint, `kubectl kustomize` on every overlay, and kubeconform schema validation against upstream Kubernetes' OpenAPI schemas on every push/PR to `main`. Terraform/Ansible linting is still not covered.
+- [x] **Alerting:** Alertmanager's default receiver now posts to an `ntfy-alertmanager` bridge in-cluster, which forwards to a private ntfy.sh topic with severity mapped to priority/tags. See runbook for the topic name.
 - [ ] **K8s Ingress & TLS:** Decide between K3s's built-in Traefik and the existing Docker-based Nginx Proxy Manager for exposing Grafana etc. externally, then wire up cert-manager or NPM accordingly.
 
 ---

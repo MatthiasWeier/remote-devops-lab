@@ -1,0 +1,40 @@
+# The App-of-Apps root. Once this one Application is bootstrapped (the last
+# manual `kubectl apply` this repo should ever need for a *new* top-level
+# app), ArgoCD watches this directory itself - every other `.yaml` file
+# directly under kubernetes/apps/ (including this one) becomes a
+# self-managing, auto-registered Application on the next `git push`.
+#
+# directory.recurse is deliberately left at its default (false). Each child
+# Application already owns its own kubernetes/apps/manifests/<app>/ directory
+# as its sync source. If this root Application recursed into that same tree,
+# the raw Deployments/Services/etc. inside it would be reconciled by BOTH
+# this Application and their real owning Application at once - two
+# controllers fighting over resource ownership/pruning. Recursing one level
+# deep (root-app -> kubernetes/apps/*.yaml only) avoids that entirely.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root-app
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/MatthiasWeier/remote-devops-lab.git
+    targetRevision: main
+    path: kubernetes/apps
+    directory:
+      recurse: false
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
