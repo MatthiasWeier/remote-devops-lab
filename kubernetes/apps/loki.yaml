@@ -49,6 +49,13 @@ spec:
               - ReadWriteOnce
 
         loki:
+          # Chart defaults to multi-tenant mode (requires an X-Scope-OrgID
+          # header on every request - confirmed live: a query without one
+          # returned "no org id"). Single Grafana, single cluster, no need
+          # for tenant separation - disabling this avoids having to
+          # configure that header everywhere, including in Grafana's own
+          # datasource config below.
+          auth_enabled: false
           commonConfig:
             replication_factor: 1
           # Chart defaults loki.storage.type to "s3" (and then requires
