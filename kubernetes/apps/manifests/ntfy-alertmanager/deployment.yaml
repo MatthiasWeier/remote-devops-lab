@@ -24,6 +24,13 @@ spec:
               mountPath: /etc/ntfy-alertmanager/config
               subPath: config
               readOnly: true
+            # Custom notification body template (see notification.tmpl in
+            # the same SealedSecret) - the default body dumps every label
+            # and annotation, which is unreadable on a phone lock screen.
+            - name: config
+              mountPath: /etc/ntfy-alertmanager/notification.tmpl
+              subPath: notification.tmpl
+              readOnly: true
       volumes:
         # ntfy-alertmanager-config is a SealedSecret (see sealed-config.yaml)
         # rather than a ConfigMap - the file it decrypts to contains the
