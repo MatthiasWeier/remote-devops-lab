@@ -1,0 +1,67 @@
+# Log aggregation - closes the "metrics but no logs" gap (Prometheus/Grafana
+# already cover metrics; before this, a log meant `kubectl logs` per pod by
+# hand). Monolithic deployment mode (single binary, chart v12+ renamed this
+# from "SingleBinary"), filesystem storage on Longhorn - no S3/MinIO, this
+# is a single-node-effectively homelab, not worth the extra moving parts.
+#
+# As of 2026-03-16 this chart lives in grafana-community/helm-charts, not
+# the original grafana/helm-charts repo, for OSS users - verify that's
+# still current before bumping targetRevision:
+#   helm repo add grafana-community https://grafana-community.github.io/helm-charts
+#   helm search repo grafana-community/loki --versions
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loki
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://grafana-community.github.io/helm-charts
+    chart: loki
+    targetRevision: 18.11.7
+    helm:
+      values: |
+        deploymentMode: Monolithic
+
+        singleBinary:
+          replicas: 1
+          persistence:
+            enabled: true
+            storageClass: longhorn
+            size: 20Gi
+            accessModes:
+              - ReadWriteOnce
+
+        loki:
+          commonConfig:
+            replication_factor: 1
+          limits_config:
+            retention_period: 168h  # 7 days - homelab, not compliance-driven retention
+
+        # No S3/MinIO - filesystem storage on the Longhorn PVC above only.
+        minio:
+          enabled: false
+
+        # These chart-bundled components aren't needed - Alloy (alloy.yaml)
+        # is the log collector, and Grafana already exists via
+        # kube-prometheus-stack.
+        gateway:
+          enabled: false
+        test:
+          enabled: false
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: loki
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

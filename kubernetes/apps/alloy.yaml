@@ -1,0 +1,119 @@
+# Log collector, ships every pod's container logs to Loki. Runs as a
+# DaemonSet (chart default) - one Alloy per node, each only watching pods
+# scheduled on its own node (see the `spec.nodeName` field selector in the
+# config below), reading logs via the Kubernetes API rather than a hostPath
+# mount onto /var/log/pods.
+#
+# Promtail (the older collector) reached end-of-life 2026-03-02 - this uses
+# Alloy, the currently-recommended collector, from the start rather than
+# something already deprecated.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: alloy
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: alloy
+    targetRevision: 1.12.1
+    helm:
+      values: |
+        alloy:
+          configMap:
+            content: |
+              loki.write "default" {
+                endpoint {
+                  url = "http://loki.loki.svc.cluster.local:3100/loki/api/v1/push"
+                }
+              }
+
+              discovery.kubernetes "pod" {
+                role = "pod"
+                selectors {
+                  role  = "pod"
+                  field = "spec.nodeName=" + coalesce(sys.env("HOSTNAME"), constants.hostname)
+                }
+              }
+
+              discovery.relabel "pod_logs" {
+                targets = discovery.kubernetes.pod.targets
+
+                rule {
+                  source_labels = ["__meta_kubernetes_namespace"]
+                  action        = "replace"
+                  target_label  = "namespace"
+                }
+
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_name"]
+                  action        = "replace"
+                  target_label  = "pod"
+                }
+
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_container_name"]
+                  action        = "replace"
+                  target_label  = "container"
+                }
+
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+                  action        = "replace"
+                  target_label  = "app"
+                }
+
+                rule {
+                  source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_container_name"]
+                  action        = "replace"
+                  target_label  = "job"
+                  separator     = "/"
+                  replacement   = "$1"
+                }
+
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+                  action        = "replace"
+                  target_label  = "__path__"
+                  separator     = "/"
+                  replacement   = "/var/log/pods/*$1/*.log"
+                }
+
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_container_id"]
+                  action        = "replace"
+                  target_label  = "container_runtime"
+                  regex         = `^(\S+):\/\/.+$`
+                  replacement   = "$1"
+                }
+              }
+
+              loki.source.kubernetes "pod_logs" {
+                targets    = discovery.relabel.pod_logs.output
+                forward_to = [loki.process.pod_logs.receiver]
+              }
+
+              loki.process "pod_logs" {
+                stage.static_labels {
+                  values = {
+                    cluster = "homelab",
+                  }
+                }
+
+                forward_to = [loki.write.default.receiver]
+              }
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: loki
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

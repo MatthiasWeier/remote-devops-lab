@@ -134,6 +134,14 @@ spec:
               - secretName: grafana-tls
                 hosts:
                   - grafana.matt-host.de
+          # Wires up Loki (loki.yaml + alloy.yaml) as a Grafana datasource -
+          # "Explore" -> Loki now shows every pod's logs, queryable by the
+          # namespace/pod/container/app labels Alloy attaches.
+          additionalDataSources:
+            - name: Loki
+              type: loki
+              url: http://loki.loki.svc.cluster.local:3100
+              access: proxy
 
   destination:
     server: https://kubernetes.default.svc
