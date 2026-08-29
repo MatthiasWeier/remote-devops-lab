@@ -5,9 +5,19 @@
 # kubernetes/apps/longhorn.yaml in this repo). That means a
 # `defaultSettings.backupTarget` Helm value only takes effect on a FRESH
 # install; it will NOT retroactively change a live setting. The two Setting
-# custom resources below ARE how you change it live, and Longhorn's own
-# controller reconciles them continuously - this file is the actual
-# source of truth going forward, not a Helm values block.
+# custom resources below are the intended live-update mechanism, but confirmed
+# live on this cluster: Longhorn's `mutator.longhorn.io` admission webhook
+# rejects a plain `kubectl apply`/create for a Setting object that doesn't
+# already exist server-side ("setting backup-target does not exist") - `backup-target`
+# and `backup-target-credential-secret` are apparently created lazily by
+# Longhorn's own controller on first configuration, not pre-seeded for every
+# possible setting name. Until you configure a backup target ONCE through the
+# Longhorn UI (now reachable via ingress.yaml in this same directory) or its
+# API - which makes the Setting object exist - ArgoCD will keep retrying this
+# Application and failing on that same admission error. Once it exists,
+# GitOps patches here should take over cleanly. This is a real, unresolved
+# limitation of this design, not a placeholder value issue - flagging it
+# rather than pretending it already works.
 #
 # For documentation/parity, if you ever do a from-scratch reinstall, the
 # equivalent Helm values are:
