@@ -39,6 +39,12 @@ spec:
         loki:
           commonConfig:
             replication_factor: 1
+          # Chart defaults loki.storage.type to "s3" (and then requires
+          # bucketNames even though nothing else about s3 is configured) -
+          # confirmed live: sync failed with "Please define
+          # loki.storage.bucketNames.chunks" until this was set explicitly.
+          storage:
+            type: filesystem
           limits_config:
             retention_period: 168h  # 7 days - homelab, not compliance-driven retention
 
