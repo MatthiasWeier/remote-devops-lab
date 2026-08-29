@@ -19,50 +19,54 @@
 # limitation of this design, not a placeholder value issue - flagging it
 # rather than pretending it already works.
 #
+# --- STATUS AS OF 2026-08-29: prepared ahead of time, not yet live. ---
+# No NAS exists on the network yet (arriving within a few weeks). The value
+# below is a deliberate PLACEHOLDER hostname, "NAS-Backup" - once the real
+# NAS is racked, replace it with its actual reachable hostname or IP and
+# the real share path (and add a DNS entry or /etc/hosts-equivalent for
+# "NAS-Backup" if you'd rather keep that name than switch to a raw IP).
+#
+# This file being present and even resolving DNS-wise is NOT enough on its
+# own to go live - see the prerequisite explained above (bug 26): Longhorn's
+# admission webhook rejects these Setting objects entirely until a backup
+# target has been configured ONCE through the Longhorn UI/API, which is
+# what makes the Setting exist server-side for GitOps to take over
+# afterward. Expect this Application to keep failing that same admission
+# error (`setting backup-target does not exist`) until that one-time manual
+# step happens - that's expected, not a sign this file is wrong.
+#
 # For documentation/parity, if you ever do a from-scratch reinstall, the
-# equivalent Helm values are:
+# equivalent Helm value is:
 #   defaultSettings:
-#     backupTarget: "s3://backup-bucket@eu-central-1/"   # or nfs://... below
-#     backupTargetCredentialSecret: "longhorn-backup-secret"
+#     backupTarget: "nfs://NAS-Backup:/volume1/longhorn-backups"
 #
-# --- Choose ONE backupTarget value below and comment out the other ---
-#
-# NFS example - point at a share on your NAS. No credential Secret needed
-# for NFS (auth, if any, is handled at the NFS server/export level):
-#   nfs://192.168.178.10:/volume1/backups
-#
-# S3 example - any S3-compatible endpoint (AWS, MinIO, Backblaze B2 via its
-# S3-compatible API, etc.). Format is s3://<bucket>@<region>/<optional-path>:
-#   s3://backup-bucket@eu-central-1/
-# For a non-AWS S3-compatible endpoint, also set AWS_ENDPOINTS in the
-# Secret below (Longhorn reads it from the same credential secret).
+# If the NAS ends up being S3-compatible instead of NFS (e.g. MinIO running
+# on it), switch the value below to the s3:// form instead and uncomment
+# the credential Setting + Secret creation command underneath - format is
+# s3://<bucket>@<region>/<optional-path>, and AWS_ENDPOINTS in the Secret
+# points at the NAS's S3-compatible endpoint.
 apiVersion: longhorn.io/v1beta2
 kind: Setting
 metadata:
   name: backup-target
   namespace: longhorn-system
-value: "s3://backup-bucket@eu-central-1/"
+value: "nfs://NAS-Backup:/volume1/longhorn-backups"
 
----
-# Only required for the S3 path above - omit/delete this Setting entirely if
-# using the NFS target, since NFS has no credential secret to reference.
-apiVersion: longhorn.io/v1beta2
-kind: Setting
-metadata:
-  name: backup-target-credential-secret
-  namespace: longhorn-system
-value: "longhorn-backup-secret"
-
----
+# --- Only needed for the S3 alternative above - leave commented out for NFS,
+#     which has no credential secret to reference. ---
+# ---
+# apiVersion: longhorn.io/v1beta2
+# kind: Setting
+# metadata:
+#   name: backup-target-credential-secret
+#   namespace: longhorn-system
+# value: "longhorn-backup-secret"
+#
 # The Secret itself is NOT defined here (real access keys, same
-# out-of-band-secret pattern as the rest of this repo). Create it once
-# before the Setting above can resolve successfully:
+# out-of-band-secret pattern as the rest of this repo, or seal it - see
+# sealed-secrets.yaml in this repo for the pattern). Create it once the S3
+# endpoint actually exists:
 #   kubectl create secret generic longhorn-backup-secret -n longhorn-system \
 #     --from-literal=AWS_ACCESS_KEY_ID="<your-access-key>" \
 #     --from-literal=AWS_SECRET_ACCESS_KEY="<your-secret-key>" \
-#     --from-literal=AWS_ENDPOINTS="https://your-s3-endpoint"   # omit for real AWS S3
-#
-# PREREQUISITE this file cannot satisfy for you: an actual NFS share or S3
-# bucket has to exist somewhere off this cluster first. Nothing in this repo
-# provisions one - that's infrastructure outside K3s/Terraform's scope here
-# (a NAS export, or a cloud storage bucket you create separately).
+#     --from-literal=AWS_ENDPOINTS="https://your-s3-endpoint"
