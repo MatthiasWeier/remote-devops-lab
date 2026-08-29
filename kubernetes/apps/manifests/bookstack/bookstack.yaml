@@ -11,7 +11,8 @@
 #   kubectl create namespace bookstack
 #   kubectl create secret generic bookstack-secrets -n bookstack \
 #     --from-literal=MYSQL_ROOT_PASSWORD="$(openssl rand -base64 32)" \
-#     --from-literal=MYSQL_PASSWORD="$(openssl rand -base64 32)"
+#     --from-literal=MYSQL_PASSWORD="$(openssl rand -base64 32)" \
+#     --from-literal=APP_KEY="base64:$(openssl rand -base64 32)"
 
 ---
 apiVersion: v1
@@ -131,6 +132,20 @@ spec:
               value: "Europe/Berlin"
             - name: APP_URL
               value: "https://wiki.matt-host.de"
+            # Newer linuxserver/bookstack builds stopped auto-generating an
+            # APP_KEY (Laravel's app-level encryption key) on first run -
+            # without it the container halts init before ever listening on
+            # port 80, which looks like a normal Running pod but fails every
+            # connection (confirmed live: 502 at the edge, connection
+            # refused straight to the pod's ClusterIP, `kubectl logs` showing
+            # "The application key is missing, halting init!"). Same
+            # out-of-band-secret pattern as DB_PASS below - see the top of
+            # this file for how bookstack-secrets is seeded.
+            - name: APP_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: bookstack-secrets
+                  key: APP_KEY
             - name: DB_HOST
               value: bookstack-db
             - name: DB_USER
