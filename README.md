@@ -1,11 +1,13 @@
 # Remote DevOps Portfolio
 
-**Goal:** Build a modern, scalable cloud environment
+**A real, self-hosted GitOps Kubernetes platform running on my own Proxmox hardware** — Terraform → Ansible → K3s → ArgoCD, with Sealed Secrets, Prometheus/Alertmanager alerting to my phone, and a CI pipeline that validates every manifest before it reaches the cluster. Every bug hit along the way is documented with its root cause, not just the fix. Started as a cloud DevOps portfolio project on Oracle Cloud Infrastructure (still below); the homelab is now the main, actively-developed part.
 
-This repository documents my journey from manual click-ops to a fully automated cloud environment managed via Infrastructure as Code (IaC) on Oracle Cloud Infrastructure (OCI).
+[![Validate GitOps manifests](https://github.com/MatthiasWeier/remote-devops-lab/actions/workflows/validate-gitops.yml/badge.svg)](https://github.com/MatthiasWeier/remote-devops-lab/actions/workflows/validate-gitops.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Last commit](https://img.shields.io/github/last-commit/MatthiasWeier/remote-devops-lab)
 
 📄 **[Overview for recruiters](docs/00-for-recruiters.md)** — what this is and why it exists, in plain language.
-📄 **[Full setup & runbook](docs/01-setup-and-runbook.md)** — architecture diagram, step-by-step replication guide, and every bug hit along the way (with fixes).
+📄 **[Full setup & runbook](docs/01-setup-and-runbook.md)** — architecture diagram, step-by-step replication guide, and every bug hit along the way (with root causes, not just fixes).
 
 ---
 
