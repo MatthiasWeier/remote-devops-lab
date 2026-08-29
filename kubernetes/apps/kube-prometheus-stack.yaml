@@ -29,6 +29,23 @@ spec:
       #     | kubectl apply --server-side -f -
       skipCrds: true
       values: |
+        # K3s bundles the controller-manager, scheduler, and kube-proxy into
+        # its single k3s binary rather than running them as separately
+        # scrapeable components the way kubeadm clusters do - this chart's
+        # default ServiceMonitors for them can never find a real target, so
+        # KubeControllerManagerDown/KubeSchedulerDown/KubeProxyDown are
+        # permanent false positives on K3s, not real signal. Discovered
+        # 2026-08-29 once Alertmanager's null-receiver bug (see the
+        # alertmanager.config comment below) was fixed and these actually
+        # started reaching ntfy for the first time. Disabling the component
+        # here removes both the doomed ServiceMonitor and its alert rule.
+        kubeControllerManager:
+          enabled: false
+        kubeScheduler:
+          enabled: false
+        kubeProxy:
+          enabled: false
+
         prometheus:
           prometheusSpec:
             storageSpec:
