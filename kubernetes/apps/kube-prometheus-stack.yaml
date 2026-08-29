@@ -61,6 +61,27 @@ spec:
           # JSON payload into ntfy's title/priority/tags fields directly;
           # the bridge does that translation. See docs/01-setup-and-runbook.md
           # for the exact ntfy.sh topic to subscribe to.
+          # CONFIRMED BUG (2026-08-29, docs/01-setup-and-runbook.md bug 34):
+          # this config silently failed validation for its entire life until
+          # this fix - the chart auto-injects a `route.routes[]` sub-route
+          # sending the Watchdog alert to a receiver literally named "null"
+          # (its own convention for "drop this"), regardless of what
+          # `receivers:` you provide. Supplying a `receivers:` list that
+          # doesn't include a receiver named "null" makes the Prometheus
+          # Operator reject the whole config at its own validation step
+          # ("undefined receiver \"null\" used in route") and silently keep
+          # the last-good (i.e. default, nothing-configured) generated
+          # config instead - Helm/kubectl/ArgoCD all reported success
+          # throughout, because the Secret Helm renders is valid YAML; only
+          # the Operator's *semantic* validation of it, one layer further
+          # in, ever saw the problem, and it fails closed silently rather
+          # than surfacing anywhere ArgoCD or `kubectl get` would show it.
+          # Only `kubectl get secret alertmanager-kube-prometheus-stack-
+          # alertmanager-generated` (not the similarly-named secret without
+          # -generated, which is just Helm's input and was never the issue)
+          # and the operator's own pod logs ever showed the real, currently-
+          # active config - verify against that secret specifically after
+          # touching this block.
           config:
             global:
               resolve_timeout: 5m
@@ -75,6 +96,7 @@ spec:
                 webhook_configs:
                   - url: 'http://ntfy-alertmanager.monitoring.svc.cluster.local:8080/'
                     send_resolved: true
+              - name: 'null'
 
         grafana:
           persistence:
