@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 import requests
 from kubernetes import client, config
 
-NAMESPACES = ["argocd", "tandoor", "immich", "monitoring"]
+NAMESPACES = ["argocd", "tandoor", "tandoor-staging", "immich", "monitoring", "bookstack", "longhorn-system"]
 REQUIRED_ENV_VARS = ["BOOKSTACK_URL", "BOOKSTACK_TOKEN_ID", "BOOKSTACK_TOKEN_SECRET", "PAGE_ID"]
 
 
