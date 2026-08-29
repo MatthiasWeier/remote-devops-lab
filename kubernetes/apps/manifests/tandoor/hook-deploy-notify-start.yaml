@@ -1,0 +1,56 @@
+# ArgoCD PreSync hook - runs automatically before every sync (i.e. every
+# git-push-triggered deploy of this app), no manual step needed. Silences
+# the fast CriticalAppDown alert (observability-extras/critical-apps-fast-
+# alert.yaml) for 10 minutes and posts a "deploy in progress" notice, so a
+# Recreate-strategy rollout's expected brief downtime doesn't look like an
+# unplanned outage. hook-deploy-notify-done.yaml resolves the notice.
+#
+# Deliberately does NOT use `set -e` and swallows every curl failure with
+# `|| true` - if Alertmanager is briefly unreachable, this hook must still
+# exit 0. A PreSync hook that fails BLOCKS the actual sync from proceeding;
+# a missed notification is a much smaller problem than an app that can't
+# deploy because monitoring hiccuped.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tandoor-deploy-notify-start
+  namespace: tandoor
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded,HookFailed
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 30
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: notify
+          image: curlimages/curl:8.10.1
+          command: ["sh", "-c"]
+          args:
+            - |
+              AM=http://kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local:9093
+              NOW=$(date +%s)
+              END=$((NOW + 600))
+              NOW_ISO=$(date -u -d "@$NOW" +%Y-%m-%dT%H:%M:%S.000Z)
+              END_ISO=$(date -u -d "@$END" +%Y-%m-%dT%H:%M:%S.000Z)
+
+              curl -sm 10 -X POST "$AM/api/v2/silences" -H 'Content-Type: application/json' -d '{
+                "matchers": [
+                  {"name":"alertname","value":"CriticalAppDown","isRegex":false},
+                  {"name":"namespace","value":"tandoor","isRegex":false}
+                ],
+                "startsAt": "'"$NOW_ISO"'",
+                "endsAt": "'"$END_ISO"'",
+                "createdBy": "argocd-presync-hook",
+                "comment": "Automatic silence: tandoor deploy in progress"
+              }' || true
+
+              curl -sm 10 -X POST "$AM/api/v2/alerts" -H 'Content-Type: application/json' -d '[{
+                "labels": {"alertname":"DeploymentInProgress","namespace":"tandoor","severity":"info"},
+                "annotations": {"summary":"Tandoor is being updated - brief downtime possible"},
+                "startsAt": "'"$NOW_ISO"'"
+              }]' || true
+
+              exit 0

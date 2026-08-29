@@ -1,0 +1,39 @@
+# ArgoCD PostSync hook - resolves the DeploymentInProgress notice that
+# hook-deploy-notify-start.yaml opened, by re-posting the same alert labels
+# with endsAt in the past. Alertmanager treats that as a resolution and
+# (send_resolved: true on the ntfy webhook) delivers a "done" notification.
+# Same non-blocking design as the PreSync hook - never fails the sync.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tandoor-deploy-notify-done
+  namespace: tandoor
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded,HookFailed
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 30
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: notify
+          image: curlimages/curl:8.10.1
+          command: ["sh", "-c"]
+          args:
+            - |
+              AM=http://kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local:9093
+              NOW=$(date +%s)
+              STARTS=$((NOW - 60))
+              NOW_ISO=$(date -u -d "@$NOW" +%Y-%m-%dT%H:%M:%S.000Z)
+              STARTS_ISO=$(date -u -d "@$STARTS" +%Y-%m-%dT%H:%M:%S.000Z)
+
+              curl -sm 10 -X POST "$AM/api/v2/alerts" -H 'Content-Type: application/json' -d '[{
+                "labels": {"alertname":"DeploymentInProgress","namespace":"tandoor","severity":"info"},
+                "annotations": {"summary":"Tandoor update finished"},
+                "startsAt": "'"$STARTS_ISO"'",
+                "endsAt": "'"$NOW_ISO"'"
+              }]' || true
+
+              exit 0

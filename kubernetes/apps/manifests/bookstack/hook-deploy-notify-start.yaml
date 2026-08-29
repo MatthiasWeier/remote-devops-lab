@@ -1,0 +1,46 @@
+# See kubernetes/apps/manifests/tandoor/hook-deploy-notify-start.yaml for
+# the full explanation - identical mechanism, scoped to bookstack.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bookstack-deploy-notify-start
+  namespace: bookstack
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded,HookFailed
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 30
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: notify
+          image: curlimages/curl:8.10.1
+          command: ["sh", "-c"]
+          args:
+            - |
+              AM=http://kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local:9093
+              NOW=$(date +%s)
+              END=$((NOW + 600))
+              NOW_ISO=$(date -u -d "@$NOW" +%Y-%m-%dT%H:%M:%S.000Z)
+              END_ISO=$(date -u -d "@$END" +%Y-%m-%dT%H:%M:%S.000Z)
+
+              curl -sm 10 -X POST "$AM/api/v2/silences" -H 'Content-Type: application/json' -d '{
+                "matchers": [
+                  {"name":"alertname","value":"CriticalAppDown","isRegex":false},
+                  {"name":"namespace","value":"bookstack","isRegex":false}
+                ],
+                "startsAt": "'"$NOW_ISO"'",
+                "endsAt": "'"$END_ISO"'",
+                "createdBy": "argocd-presync-hook",
+                "comment": "Automatic silence: bookstack deploy in progress"
+              }' || true
+
+              curl -sm 10 -X POST "$AM/api/v2/alerts" -H 'Content-Type: application/json' -d '[{
+                "labels": {"alertname":"DeploymentInProgress","namespace":"bookstack","severity":"info"},
+                "annotations": {"summary":"BookStack is being updated - brief downtime possible"},
+                "startsAt": "'"$NOW_ISO"'"
+              }]' || true
+
+              exit 0

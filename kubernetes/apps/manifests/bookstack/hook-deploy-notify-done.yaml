@@ -1,0 +1,36 @@
+# See kubernetes/apps/manifests/tandoor/hook-deploy-notify-done.yaml for
+# the full explanation - identical mechanism, scoped to bookstack.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bookstack-deploy-notify-done
+  namespace: bookstack
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded,HookFailed
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 30
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: notify
+          image: curlimages/curl:8.10.1
+          command: ["sh", "-c"]
+          args:
+            - |
+              AM=http://kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local:9093
+              NOW=$(date +%s)
+              STARTS=$((NOW - 60))
+              NOW_ISO=$(date -u -d "@$NOW" +%Y-%m-%dT%H:%M:%S.000Z)
+              STARTS_ISO=$(date -u -d "@$STARTS" +%Y-%m-%dT%H:%M:%S.000Z)
+
+              curl -sm 10 -X POST "$AM/api/v2/alerts" -H 'Content-Type: application/json' -d '[{
+                "labels": {"alertname":"DeploymentInProgress","namespace":"bookstack","severity":"info"},
+                "annotations": {"summary":"BookStack update finished"},
+                "startsAt": "'"$STARTS_ISO"'",
+                "endsAt": "'"$NOW_ISO"'"
+              }]' || true
+
+              exit 0

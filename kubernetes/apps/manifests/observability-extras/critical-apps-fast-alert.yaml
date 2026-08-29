@@ -1,0 +1,36 @@
+# kube-prometheus-stack's default rules (KubePodNotReady, KubeDeployment
+# ReplicasMismatch, etc.) use for: 15m - a sensible default for a large,
+# noisy fleet where a brief blip shouldn't page anyone, but wrong for a
+# homelab with single-replica apps: if the one pod is down, the app IS
+# down, there's no redundancy to "wait and see" about. This rule is
+# deliberately separate from those defaults (not a tuning change to them -
+# they still apply cluster-wide at 15m as a slower "still down" backstop)
+# and only covers the handful of apps where someone actually notices
+# quickly if they're unreachable.
+#
+# namespace=~"tandoor|bookstack" is an exact-match regex (PromQL label
+# regexes are fully anchored), so this does NOT match tandoor-staging,
+# which is deliberately scaled to 0 replicas most of the time - see
+# tandoor-staging.yaml. Extend the regex here when adding a new app to this
+# list; Immich is deliberately not included yet (multiple Deployments -
+# server, machine-learning - needs more thought on what "down" means for
+# it than a single replicas-available check).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: critical-apps-fast-alert
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: critical-apps-fast
+      rules:
+        - alert: CriticalAppDown
+          expr: kube_deployment_status_replicas_available{namespace=~"tandoor|bookstack"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.deployment }} has no available replicas"
+            description: "Fires ~1 minute after the last replica goes unavailable - fast on purpose, these are single-replica apps with no redundancy. Automatically silenced during a git-triggered ArgoCD deploy by that app's PreSync/PostSync hooks (see manifests/tandoor/ and manifests/bookstack/) - if this fires anyway, it's either an unplanned outage or a deploy that's taking unusually long."
