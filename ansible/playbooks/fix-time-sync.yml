@@ -1,0 +1,73 @@
+---
+# Replaces systemd-timesyncd with chrony on every K3s node.
+#
+# Root cause (docs/01-setup-and-runbook.md has the full writeup): all three
+# nodes were firing NodeClockNotSynchronising continuously. NTP itself was
+# never the problem - UDP 123 to both pool.ntp.org and the router worked
+# fine, and journalctl showed a valid NTP response had been received hours
+# earlier. What was actually happening: systemd-timesyncd restarts its
+# entire connection attempt on every "network configuration changed" event,
+# and a K3s node generates a LOT of those - every pod create/destroy adds
+# or removes a veth interface, which is exactly the kind of event
+# timesyncd treats as a topology change worth restarting for. On a node
+# with any real pod churn, timesyncd can end up permanently restarting
+# before it ever completes a fresh handshake. chrony doesn't have this
+# weakness - it's built to tolerate exactly this kind of interface churn,
+# which is why it's the standard fix for this class of problem on
+# container hosts specifically (not a homelab-specific workaround).
+#
+# One-shot ad-hoc equivalent, if you'd rather not run the full playbook:
+#   ansible k3s_cluster -i ansible/inventories/production/hosts.ini -b \
+#     -m ansible.builtin.apt -a "name=chrony state=present update_cache=yes"
+#   ansible k3s_cluster -i ansible/inventories/production/hosts.ini -b \
+#     -m ansible.builtin.systemd -a "name=systemd-timesyncd state=stopped enabled=no"
+#   ansible k3s_cluster -i ansible/inventories/production/hosts.ini -b \
+#     -m ansible.builtin.systemd -a "name=chrony state=started enabled=yes"
+
+- name: Replace systemd-timesyncd with chrony on every K3s node
+  hosts: k3s_cluster
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: Install chrony
+      apt:
+        name: chrony
+        state: present
+        update_cache: yes
+
+    # Confirmed live: installing chrony on Debian already stops/removes the
+    # systemd-timesyncd unit entirely as a package-conflict side effect (its
+    # dbus alias, dbus-org.freedesktop.timesync1.service, is left behind in
+    # a "bad" state, harmless) - by the time this task would run, the unit
+    # is often already gone, and ansible.builtin.systemd fails hard
+    # ("Could not find the requested service") rather than treating a
+    # missing unit as "goal already achieved". Check first so this stays
+    # idempotent on both a fresh node (timesyncd present, needs stopping)
+    # and a node where chrony already removed it.
+    - name: Check whether systemd-timesyncd unit still exists
+      command: systemctl list-unit-files systemd-timesyncd.service
+      register: timesyncd_unit_check
+      changed_when: false
+      failed_when: false
+
+    - name: Stop and disable systemd-timesyncd, if it still exists
+      systemd:
+        name: systemd-timesyncd
+        state: stopped
+        enabled: no
+      when: "'systemd-timesyncd.service' in timesyncd_unit_check.stdout"
+
+    - name: Ensure chrony is enabled and running
+      systemd:
+        name: chrony
+        state: started
+        enabled: yes
+
+    - name: Wait for chrony to actually complete a sync
+      command: timedatectl show --property=NTPSynchronized --value
+      register: ntp_synced
+      changed_when: false
+      retries: 12
+      delay: 10
+      until: ntp_synced.stdout == "yes"
