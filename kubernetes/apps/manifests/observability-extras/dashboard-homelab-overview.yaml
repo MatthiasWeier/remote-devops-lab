@@ -2,16 +2,31 @@
 # namespace (confirmed live via the grafana-sc-dashboard sidecar container's
 # env: LABEL=grafana_dashboard, LABEL_VALUE=1, NAMESPACE=ALL) - this makes
 # the dashboard genuinely GitOps-managed instead of a one-off API call.
-# Redesigned from the original version per feedback: collapsible rows
-# grouped by concern, Pod/ArgoCD health condensed into a single pie/bar
-# gauge each instead of separate stat panels, the full ArgoCD app table
-# removed, top-10-pods tables replaced with horizontal bar gauges, and
-# green/yellow/red (70%/85%) thresholds added to every CPU/memory/disk
-# panel plus two semi-circle gauges for overall cluster CPU/memory.
 #
 # To edit: change the JSON below, commit, push. ArgoCD re-applies the
 # ConfigMap and the sidecar picks up the change automatically - no manual
 # Grafana UI edits or API calls needed going forward.
+#
+# COLOR SEMANTICS - learned the hard way, worth preserving as a comment:
+# any stat/gauge/bargauge panel that omits BOTH fieldConfig.defaults.color
+# and .thresholds still gets colored - Grafana falls back to a *built-in*
+# default (green at 0, red at 80), not "no color". That silently painted
+# the 24h request-count stat and both Top-10-pods bar gauges red, since
+# raw request counts and byte values routinely exceed 80. Two rules now
+# applied everywhere in this file to avoid that recurring:
+#   1. Any panel whose value is a genuine magnitude with no "bad direction"
+#      (request counts, top-N resource consumers) gets an EXPLICIT
+#      color.mode: "fixed" - never left to fall through to the default.
+#   2. Any panel encoding a status category (ArgoCD Healthy/Unhealthy/
+#      OutOfSync) is colored via byName field overrides with a FIXED color
+#      per label, not via numeric thresholds - "Healthy" must always render
+#      green regardless of the count, which a threshold-on-magnitude can't
+#      express correctly (a threshold like ">=1 is green" breaks the moment
+#      the healthy count is legitimately 0, e.g. mid-outage).
+# Real utilization gauges (CPU/RAM/disk %) keep threshold-based coloring
+# (green/orange/red at 75%/90%) since there magnitude genuinely IS the
+# signal - but color.mode: "thresholds" is now set explicitly rather than
+# assumed, since gauge/bargauge apparently don't reliably default to it.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -58,16 +73,16 @@ data:
           "gridPos": { "h": 6, "w": 7, "x": 10, "y": 1 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [{ "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)", "refId": "A" }],
-          "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100,
-            "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 70 }, { "color": "red", "value": 85 }] } }, "overrides": [] },
+          "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "color": { "mode": "thresholds" },
+            "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 75 }, { "color": "red", "value": 90 }] } }, "overrides": [] },
           "options": { "showThresholdLabels": false, "showThresholdMarkers": true, "orientation": "auto" } },
 
         { "type": "gauge", "title": "Cluster Memory Usage", "id": 4,
           "gridPos": { "h": 6, "w": 7, "x": 17, "y": 1 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [{ "expr": "100 * (1 - (sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes)))", "refId": "A" }],
-          "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100,
-            "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 70 }, { "color": "red", "value": 85 }] } }, "overrides": [] },
+          "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "color": { "mode": "thresholds" },
+            "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 75 }, { "color": "red", "value": 90 }] } }, "overrides": [] },
           "options": { "showThresholdLabels": false, "showThresholdMarkers": true, "orientation": "auto" } },
 
         { "type": "row", "title": "🚀 GitOps (ArgoCD)", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 }, "id": 101 },
@@ -80,9 +95,10 @@ data:
             { "expr": "count(argocd_app_info{health_status!=\"Healthy\"}) OR on() vector(0)", "legendFormat": "Unhealthy", "refId": "B" },
             { "expr": "count(argocd_app_info{sync_status!=\"Synced\"}) OR on() vector(0)", "legendFormat": "OutOfSync", "refId": "C" }
           ],
-          "fieldConfig": { "defaults": { "unit": "short", "min": 0,
-            "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } }, "overrides": [
-            { "matcher": { "id": "byName", "options": "Healthy" }, "properties": [{ "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }] }
+          "fieldConfig": { "defaults": { "unit": "short", "min": 0, "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [
+            { "matcher": { "id": "byName", "options": "Healthy" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+            { "matcher": { "id": "byName", "options": "Unhealthy" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] },
+            { "matcher": { "id": "byName", "options": "OutOfSync" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] }
           ] },
           "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": { "calcs": ["lastNotNull"], "values": false } } },
 
@@ -92,6 +108,7 @@ data:
           "gridPos": { "h": 8, "w": 6, "x": 0, "y": 14 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [{ "expr": "sum(increase(traefik_service_requests_total{exported_service!=\"\"}[24h]))", "refId": "A" }],
+          "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] },
           "options": { "graphMode": "area", "colorMode": "value" } },
 
         { "type": "timeseries", "title": "Request rate by app (req/s)", "id": 7,
@@ -114,7 +131,7 @@ data:
           "targets": [{ "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)", "legendFormat": "{{instance}}", "refId": "A" }],
           "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0,
             "custom": { "thresholdsStyle": { "mode": "dashed" } },
-            "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 70 }, { "color": "red", "value": 85 }] } }, "overrides": [] } },
+            "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 75 }, { "color": "red", "value": 90 }] } }, "overrides": [] } },
 
         { "type": "timeseries", "title": "Node memory usage %", "id": 10,
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 29 },
@@ -122,14 +139,14 @@ data:
           "targets": [{ "expr": "100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))", "legendFormat": "{{instance}}", "refId": "A" }],
           "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0,
             "custom": { "thresholdsStyle": { "mode": "dashed" } },
-            "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 70 }, { "color": "red", "value": 85 }] } }, "overrides": [] } },
+            "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 75 }, { "color": "red", "value": 90 }] } }, "overrides": [] } },
 
         { "type": "bargauge", "title": "Node disk usage % (root filesystem)", "id": 11,
           "gridPos": { "h": 5, "w": 24, "x": 0, "y": 37 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [{ "expr": "100 * (1 - (node_filesystem_avail_bytes{mountpoint=\"/\", fstype!=\"rootfs\"} / node_filesystem_size_bytes{mountpoint=\"/\", fstype!=\"rootfs\"}))", "legendFormat": "{{instance}}", "refId": "A" }],
-          "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100,
-            "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 70 }, { "color": "red", "value": 85 }] } }, "overrides": [] },
+          "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "color": { "mode": "thresholds" },
+            "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 75 }, { "color": "red", "value": 90 }] } }, "overrides": [] },
           "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": { "calcs": ["lastNotNull"], "values": false } } },
 
         { "type": "timeseries", "title": "Container CPU usage by namespace (cores)", "id": 12,
@@ -148,14 +165,14 @@ data:
           "gridPos": { "h": 8, "w": 12, "x": 0, "y": 50 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [{ "expr": "topk(10, sum(rate(container_cpu_usage_seconds_total{container!=\"\", container!=\"POD\"}[5m])) by (namespace, pod))", "legendFormat": "{{namespace}}/{{pod}}", "instant": true, "refId": "A" }],
-          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] },
           "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": { "calcs": ["lastNotNull"], "values": false } } },
 
         { "type": "bargauge", "title": "Top 10 pods by memory", "id": 15,
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 50 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [{ "expr": "topk(10, sum(container_memory_working_set_bytes{container!=\"\", container!=\"POD\"}) by (namespace, pod))", "legendFormat": "{{namespace}}/{{pod}}", "instant": true, "refId": "A" }],
-          "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+          "fieldConfig": { "defaults": { "unit": "bytes", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] },
           "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": { "calcs": ["lastNotNull"], "values": false } } }
       ]
     }
