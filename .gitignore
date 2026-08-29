@@ -15,3 +15,5 @@ docker/nginx-proxy-manager/docker-compose.yml
 docker/**/.env
 .vault_pass
 ~/.ansible_vault_pw
+__pycache__/
+*.pyc

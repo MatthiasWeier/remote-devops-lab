@@ -12,17 +12,20 @@ This document reflects the actual build session end to end, including every bug 
 flowchart TB
     subgraph host["Proxmox VE Host"]
         TMPL["Debian 13 Cloud-Init<br/>Template (VMID 9000)<br/>qemu-guest-agent baked in"]
-        CP["k3s-cp-01<br/>control-plane"]
-        W1["k3s-worker-01<br/>+ 50GB Longhorn disk"]
-        W2["k3s-worker-02<br/>+ 50GB Longhorn disk"]
+        subgraph dmz["k3s-dmz (Proxmox Datacenter Firewall)"]
+            CP["k3s-cp-01<br/>control-plane"]
+            W1["k3s-worker-01<br/>+ 500GB Longhorn disk"]
+            W2["k3s-worker-02<br/>+ 500GB Longhorn disk"]
+        end
     end
 
     TF["Terraform<br/>(bpg/proxmox)"] -->|clones| TMPL
-    TF -->|provisions| CP
-    TF -->|provisions| W1
-    TF -->|provisions| W2
+    TF -->|provisions + firewalls| CP
+    TF -->|provisions + firewalls| W1
+    TF -->|provisions + firewalls| W2
 
     ANS["Ansible"] -->|installs K3s server| CP
+    ANS -->|disables Klipper| CP
     ANS -->|joins via token| W1
     ANS -->|joins via token| W2
     ANS -->|formats + mounts data disk| W1
@@ -32,17 +35,25 @@ flowchart TB
     W1 --- K3S
     W2 --- K3S
 
-    K3S --> LH["Longhorn<br/>distributed storage"]
+    K3S --> LH["Longhorn<br/>distributed storage + UI"]
     K3S --> ARGO["ArgoCD"]
+    K3S --> MLB["MetalLB<br/>VIP 192.168.178.200 (L2)"]
+
+    ROUTER["Home router<br/>80/443 forwarded to .200"] --> MLB
+    MLB --> TRAEFIK["Traefik Ingress"]
+    TRAEFIK --> APPS
 
     GIT[("This Git repo")] -->|manifests| ARGO
-    ARGO -->|sync| APPS["kube-prometheus-stack<br/>cert-manager · Immich<br/>Tandoor · BookStack"]
+    ARGO -->|sync| APPS["kube-prometheus-stack · cert-manager<br/>Immich · Tandoor (+ staging overlay)<br/>BookStack · MetalLB · Longhorn UI"]
 ```
 
 **Layers, bottom to top:**
-1. **Terraform** (`terraform/proxmox/`) — provisions VMs on Proxmox via the `bpg/proxmox` provider, from a hand-built Cloud-Init template.
-2. **Ansible** (`ansible/playbooks/`) — installs K3s itself, and prepares each worker's secondary disk for Longhorn.
-3. **ArgoCD** (`kubernetes/`) — takes over cluster state from here; every application is a Git-committed `Application` manifest.
+1. **Terraform** (`terraform/proxmox/`) — provisions VMs on Proxmox via the `bpg/proxmox` provider, from a hand-built Cloud-Init template, and locks each VM's NIC into the `k3s-dmz` security group (`firewall.tf`).
+2. **Ansible** (`ansible/playbooks/`) — installs K3s itself, disables K3s's built-in Klipper load balancer so MetalLB can take over, and prepares each worker's secondary disk for Longhorn.
+3. **MetalLB** (L2 mode) — claims a floating VIP (`192.168.178.200`) for Traefik's Service, so the router's port-forward targets a VIP that survives node failure/rebalancing instead of one hardcoded node IP.
+4. **ArgoCD** (`kubernetes/`) — takes over cluster state from here; every application is a Git-committed `Application` manifest. There's still no App-of-Apps parent (see [Known limitations](#known-limitations--whats-next)), so a brand new `Application` object always needs one manual `kubectl apply` the first time, same as every app before it.
+
+The `k3s-dmz` security group (defined once, attached to all three VMs) allows SSH/6443 from the LAN and 80/443 from anywhere in, allows DNS/DHCP-to-gateway and full node-to-node mesh out, and drops everything else outbound to the rest of the LAN — the actual point being that a compromised app pod can't pivot sideways to the NAS, other PCs, or smart-home devices on the same network. Enforcement is inert until a one-time manual toggle at Datacenter → Firewall → Options in the Proxmox web UI (deliberately not Terraform-managed — see [bug 23](#bugs-hit-and-fixed)).
 
 ---
 
@@ -186,6 +197,57 @@ kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80 -n monitoring
 kubectl -n monitoring get secret kube-prometheus-stack-grafana -o jsonpath='{.data.admin-password}' | base64 -d
 ```
 
+### 9. Firewall DMZ, MetalLB, Longhorn UI, and a staging overlay
+
+Added to an already-running cluster (not part of a from-scratch bootstrap) - order matters here, more than in Step 8, because getting it wrong has real downtime/lockout consequences.
+
+**9a. Disable Klipper before anything MetalLB-related:**
+
+```bash
+ansible-playbook -i ansible/inventories/production/hosts.ini ansible/playbooks/disable-klipper.yml
+```
+
+This is a real, if brief, outage: Traefik's Service has no external IP at all from the moment Klipper's `svclb-traefik` DaemonSet is torn down until MetalLB is deployed and assigns the new VIP. Do steps 9a-9c back to back, not spread across a day.
+
+**9b. Apply the firewall - `terraform apply` creates the rules but they're inert:**
+
+```bash
+cd terraform/proxmox && terraform apply
+```
+
+The Proxmox-side rules exist after this but are not yet enforced - the cluster-wide "Firewall: Enabled" toggle at Datacenter → Firewall → Options in the Proxmox web UI is deliberately left as a manual step (`pvesh set /cluster/firewall/options --enable 1` is the CLI equivalent), specifically so enabling segmentation is never something a routine `terraform apply` could do by accident. **Immediately after flipping it, verify SSH still works before doing anything else.** If it doesn't, flip it back off - nothing in `firewall.tf` touches the Proxmox host itself, only the K3s guest VMs, so the host stays reachable regardless.
+
+**9c. Push and register the new Applications, then repoint the router:**
+
+```bash
+git push origin main
+# No App-of-Apps yet (see Known limitations) - each is a one-time manual apply:
+for f in metallb metallb-config longhorn-ui tandoor-staging; do
+  kubectl apply -f kubernetes/apps/$f.yaml
+done
+```
+
+Once `metallb-config` is `Synced`/`Healthy`, `kubectl get svc -n kube-system traefik` shows the assigned VIP (`192.168.178.200` in this build) instead of Klipper's old multi-node-IP listing. Repoint the router's 80/443 port-forward at that VIP, not a specific node - that's the actual point of MetalLB here, since forwarding to one node IP is a single point of failure the router doesn't know how to fail over.
+
+**9d. Seed the two new out-of-band secrets** (same pattern as every other app secret in this repo - see the Secret-related bugs below):
+
+```bash
+# Longhorn UI BasicAuth - the UI itself has zero built-in auth
+htpasswd -nbB admin '<password>' > /tmp/lh-htpasswd    # or: openssl passwd -apr1 '<password>'
+kubectl create secret generic longhorn-basic-auth -n longhorn-system --from-file=users=/tmp/lh-htpasswd
+
+# tandoor-staging's own DB secret - fresh random values are correct here
+# (unlike bug 21 below, this is a brand-new empty database, not one with
+# existing data a fresh password would fail to authenticate against)
+kubectl create secret generic tandoor-secrets -n tandoor-staging \
+  --from-literal=SECRET_KEY="$(openssl rand -base64 48)" \
+  --from-literal=POSTGRES_PASSWORD="$(openssl rand -base64 32)"
+```
+
+**9e. DNS** - add a CNAME for each new hostname (`longhorn.<domain>`, `staging-<app>.<domain>`) pointing at whatever your existing app subdomains already point at. cert-manager's HTTP-01 challenges for these sit in `pending` (not failed) until DNS resolves, and pick themselves back up automatically once it does - no manual retry needed.
+
+**Staging's prod-data-sync workflow** (testing a risky DB migration against real data before it ever touches production) is documented in full inside `kubernetes/apps/manifests/tandoor-staging/kustomization.yaml`'s header comment. Short version: it is intentionally a manual, operator-triggered action - Longhorn volume-snapshot the prod PVC (or `pg_dump`/`pg_restore` via `kubectl exec` if cross-namespace snapshot cloning isn't set up), restore into staging's own PVC with staging scaled to 0, scale up, test, discard. There's no way to express "clone real prod data on demand" as a declarative GitOps desired-state, so this isn't automated and isn't meant to be.
+
 ---
 
 ## Bugs hit and fixed
@@ -282,8 +344,41 @@ Documented in detail because they're the actual engineering content of this buil
 **Cause:** `Deployment`'s default `RollingUpdate` strategy schedules the new pod before terminating the old one. With `replicas: 1` and the app's PVCs mode `ReadWriteOnce`, the new pod can never actually start - `Multi-Attach error for volume ...: Volume is already used by pod(s) <old-pod>` - and since Kubernetes won't kill the old pod until the new one is Ready, neither side can proceed without manual intervention (delete the stuck new pod). This applies to Tandoor and BookStack; it would apply to any future single-replica app with RWO storage added the same way.
 **Fix:** `strategy: {type: Recreate}` on both Deployments - explicitly stop the old pod (and release its volumes) before starting the new one, trading a few seconds of downtime per rollout for a rollout that doesn't hang.
 
+### 23. Proxmox VM-level firewall rules exist but do nothing until a cluster-wide switch is flipped
+**Cause:** `network_device.firewall = true` plus a security group's rules only arms a VM's NIC to *evaluate* rules - Proxmox's Datacenter-level "Firewall: Enabled" option is a separate, global on/off switch, and until it's on, every VM-level rule is inert regardless of how correctly it's written.
+**Not a bug so much as a deliberate design choice worth documenting:** `firewall.tf` intentionally does not manage that Datacenter-level toggle as a Terraform resource, specifically so enabling segmentation is always a conscious, single, reversible-by-checkbox action (`pvesh set /cluster/firewall/options --enable 1`) - never something a routine `terraform apply` could silently re-enable after someone turned it off mid-incident to regain SSH access. See Step 9b above for the actual rollout order this implies.
+
+### 24. MetalLB's `bgppeers` CRD gets misdiagnosed, then correctly diagnosed, as the same CRD-annotation-size bug
+**Cause:** after `terraform apply` + first ArgoCD sync, the `metallb` Application reported "successfully synced" but stayed permanently `OutOfSync` on exactly one resource: the `bgppeers.metallb.io` CRD. Pattern-matched this immediately to [bug 11](#bugs-hit-and-fixed)'s 256KiB last-applied-configuration annotation problem and applied the same fix (`skipCrds: true` + manual `helm show crds | kubectl apply --server-side`) - except `helm show crds metallb/metallb` returned nothing. MetalLB's chart doesn't ship CRDs via Helm's special `crds/` folder at all (confirmed with `helm template --include-crds`, which does show all 7 CRDs as regular templates) - `skipCrds` was a silent no-op for this chart, and the fix was reverted before ever being real.
+**What it actually was:** the CRD's `kubectl.kubernetes.io/last-applied-configuration` annotation from the very first (pre-`ServerSideApply`) sync was still present, confusing later diffs even after `ServerSideApply=true` was added. Stripping it (`kubectl annotate crd bgppeers.metallb.io kubectl.kubernetes.io/last-applied-configuration-`) didn't fully resolve it either.
+**Current state, left as-is:** the `metallb` Application still shows `OutOfSync` on this one CRD. It's cosmetic - confirmed live that MetalLB's controller and all 3 speaker pods run fine, and Traefik's Service correctly receives its VIP and serves real HTTPS traffic through it (`curl` returned a valid TLS handshake + expected HTTP response through the VIP). `BGPPeer` specifically is unused in this build (L2 mode only, no BGP peering configured), so a permanently-stale diff on that one CRD was judged not worth more time chasing versus what it would take to actually root-cause it.
+
+### 25. ArgoCD's kustomize build rejects `../` resource references by default
+**Cause:** the first draft of the Tandoor staging overlay referenced production's manifest directly (`resources: - ../tandoor/tandoor.yaml`), the obvious DRY choice for a base+overlay layout. Both `kubectl kustomize` (tested locally before ever pushing) and ArgoCD's own kustomize build enforce `LoadRestrictionsRootOnly` by default - any resource path resolving outside the kustomization's own root directory is rejected (`file ... is not in or below ...: must build at directory`), even for a same-repo sibling directory. Fixing it "properly" means setting `kustomize.buildOptions: "--load-restrictor LoadRestrictionsNone"` in the shared `argocd-cm` ConfigMap - a cluster-wide change affecting every other Application's kustomize behavior, not something scoped to just this one overlay.
+**Fix:** made the staging overlay self-contained instead - `kubernetes/apps/manifests/tandoor-staging/base-resources.yaml` is a deliberate copy of prod's resources, not a live reference, at the cost of needing a manual re-copy if prod's resource *shapes* (not just config values) ever change. Caught locally via `kubectl kustomize <dir>` before it ever reached ArgoCD - worth running that as a sanity check on any new kustomize overlay before pushing.
+
+### 26. Longhorn's admission webhook rejects creating a `Setting` object that doesn't already exist
+**Cause:** `kubernetes/apps/manifests/longhorn-ui/backup-target.yaml` declares two raw `Setting` custom resources (`backup-target`, `backup-target-credential-secret`) as the documented live-update mechanism for a Longhorn instance that was installed out-of-band via `helm install` (so a `defaultSettings.backupTarget` Helm value can't retroactively change it). Longhorn's `mutator.longhorn.io` admission webhook rejected the sync outright: `setting backup-target does not exist`. Longhorn apparently creates `Setting` objects lazily, only for settings actually touched through its own UI/API/controller at least once - not pre-seeded for every possible setting name - so a plain external `kubectl apply`/create for a name it hasn't seen yet is rejected rather than treated as a normal upsert.
+**Current state, left as-is:** this Application will keep retrying and failing on that same admission error until a backup target is configured once through the Longhorn UI (reachable via `longhorn-ui.yaml` in the same directory) or its API, which is what actually makes the `Setting` object exist server-side. Documented as a real, unresolved limitation rather than pretending the manifest already works - there's no backup target (NFS share or S3 bucket) provisioned anywhere in this stack yet either, so this was never going to fully succeed on this pass regardless.
+
+### 27. A secret piped from Windows through SSH picks up a UTF-8 BOM, silently breaking auth
+**Cause:** generating the Longhorn UI's htpasswd secret involved `Get-Content $file | ssh ... "cat > /tmp/htpasswd"` from a Windows/PowerShell control machine - PowerShell's pipeline-to-native-process encoding prepended a UTF-8 byte-order-mark (`﻿`) to the piped content. The resulting secret's first line was `<BOM>admin:$apr1$...` instead of `admin:$apr1$...`, which Traefik's BasicAuth middleware parses as a non-matching username - every login attempt returned `401`, with no error indicating why, including with the *correct* credentials.
+**Fix:** stopped shelling text between Windows and Linux hosts entirely for anything security-sensitive - generate the htpasswd line and write the file in a single remote SSH session (`ssh host 'HASH=$(openssl passwd -apr1 "...") ; echo "admin:$HASH" > /tmp/htpasswd; kubectl create secret ...'`) instead. `od -c` on the decoded secret is a fast way to catch this class of invisible-character bug in general - a plain `cat`/`echo` won't show a BOM at all.
+
+### 28. "It works from outside, not from inside" wasn't the network - it was the browser's own DNS cache
+**Cause:** immediately after adding a new CNAME record, `longhorn.matt-host.de` failed to resolve via this machine's default (router-forwarded) DNS resolver, but resolved fine when queried directly against a public resolver (`8.8.8.8`/`1.1.1.1`) - a stale *negative* cache entry on the FRITZ!Box from before the record existed, which cleared on its own after a few minutes (DNS negative-caching TTL). Site symptom looked identical to a router NAT-hairpinning problem (works from the internet, not from the LAN) and was initially investigated as one (checked IPv6 AAAA routing, tested from a second LAN host via SSH) before the real cause became obvious. Then, even after the router's cache cleared and `curl` from the affected machine succeeded, the browser (including a fresh incognito window) still failed - Chrome/Edge keep their own internal DNS cache independent of the OS resolver, which an incognito window does not necessarily reset since it shares the same underlying browser process/network service.
+**Fix:** no cluster/network/DNS change was actually needed. A full browser restart (not just a new incognito window) resolved it. `curl` succeeding from the same machine where the browser fails is the fast way to confirm the problem is client-side, not server-side, before investigating anything on the cluster or router.
+
 ---
 
 ## Known limitations / what's next
 
-Tracked as an ongoing checklist in the root [`README.md`](../README.md#phase-6-production-hardening--gitops-maturity-next-steps) (Phase 6) — App-of-Apps automation, remote Terraform state, Longhorn backup target, GitOps secrets management, CI validation, Alertmanager receivers, and Ingress/TLS routing decisions all remain open.
+Tracked as an ongoing checklist in the root [`README.md`](../README.md#phase-6-production-hardening--gitops-maturity-next-steps) (Phase 6). Ingress/TLS routing is now resolved (cert-manager + Let's Encrypt, all live domains) and so is the earlier single-node-forward SPOF (MetalLB VIP). Still genuinely open, as of the firewall/MetalLB/staging work in [bugs 23-28](#bugs-hit-and-fixed):
+
+- **App-of-Apps automation** — every `Application` under `kubernetes/apps/` (including the 4 added today) still needs one manual `kubectl apply` the first time it's introduced; pushing to git alone never registers a new Application.
+- **Remote Terraform state** — still local, still a single point of failure for the state file itself.
+- **Longhorn backup target** — genuinely unresolved, not just unconfigured: no NFS share or S3 bucket exists anywhere in this stack yet, and even once one does, Longhorn's admission webhook requires configuring it once through the UI/API before the GitOps-managed `Setting` resources in `longhorn-ui.yaml` can take over (bug 26).
+- **GitOps secrets management** — every app secret in this repo is still created out-of-band and by hand (a growing list: Immich's Postgres password, Tandoor's and BookStack's DB secrets, tandoor-staging's own copy, Longhorn UI's BasicAuth credentials). A real Sealed Secrets or External Secrets setup would remove this manual step entirely.
+- **CI validation** — no automated `terraform validate`/`kubectl kustomize`/YAML-lint gate on push; every validation so far (including catching bugs 24 and 25 before they reached the cluster) happened by running it locally by hand first.
+- **Alertmanager receivers** — kube-prometheus-stack's Alertmanager has no configured notification channel yet; alerts fire into a void.
+- **`bgppeers.metallb.io`'s perpetual OutOfSync** (bug 24) — cosmetic, not blocking, but still an open item if anyone wants to actually root-cause it rather than accept the current explanation.
