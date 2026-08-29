@@ -4,13 +4,20 @@
 # directly under kubernetes/apps/ (including this one) becomes a
 # self-managing, auto-registered Application on the next `git push`.
 #
-# directory.recurse is deliberately left at its default (false). Each child
+# This deliberately does NOT set source.directory.recurse: true. Each child
 # Application already owns its own kubernetes/apps/manifests/<app>/ directory
 # as its sync source. If this root Application recursed into that same tree,
 # the raw Deployments/Services/etc. inside it would be reconciled by BOTH
 # this Application and their real owning Application at once - two
-# controllers fighting over resource ownership/pruning. Recursing one level
-# deep (root-app -> kubernetes/apps/*.yaml only) avoids that entirely.
+# controllers fighting over resource ownership/pruning. Non-recursive
+# (root-app -> kubernetes/apps/*.yaml only, its own default) avoids that.
+#
+# Do NOT add `directory: {recurse: false}` explicitly even though it's just
+# spelling out the default - ArgoCD normalizes an explicit all-default
+# `directory` block back to an absent key on its side, which then permanently
+# disagrees with git having it present. That produced a live selfHeal loop
+# (generation climbing every ~3min, permanently OutOfSync) the first time
+# this was bootstrapped. Leaving the key out entirely is the actual fix.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -25,8 +32,6 @@ spec:
     repoURL: https://github.com/MatthiasWeier/remote-devops-lab.git
     targetRevision: main
     path: kubernetes/apps
-    directory:
-      recurse: false
 
   destination:
     server: https://kubernetes.default.svc
