@@ -57,6 +57,20 @@ spec:
           # loki.storage.bucketNames.chunks" until this was set explicitly.
           storage:
             type: filesystem
+          # Third chart validation failure on this sync: schema_config is
+          # required, "individual for every Loki cluster" per the chart's
+          # own error message - no sane default exists for it. tsdb +
+          # filesystem is the chart's own currently-documented standard
+          # pairing for a non-object-storage install.
+          schemaConfig:
+            configs:
+              - from: "2024-01-01"
+                store: tsdb
+                object_store: filesystem
+                schema: v13
+                index:
+                  prefix: loki_index_
+                  period: 24h
           limits_config:
             retention_period: 168h  # 7 days - homelab, not compliance-driven retention
 
