@@ -146,6 +146,24 @@ spec:
                 secretKeyRef:
                   name: bookstack-secrets
                   key: APP_KEY
+            # KNOWN LANDMINE (confirmed live 2026-08-29): this build of the
+            # image no longer substitutes DB_HOST/DB_USER/DB_PASS/DB_DATABASE
+            # into /config/www/.env at all - Laravel/BookStack only ever
+            # reads its OWN persisted .env file (on the `uploads` PVC below),
+            # and a from-scratch .env is just the raw stock template
+            # (DB_HOST=localhost, DB_USERNAME=database_username, etc.),
+            # regardless of these env vars being correctly present in the
+            # container. These four env vars are kept here for documentation/
+            # continuity, but they are NOT what BookStack actually connects
+            # with - if /config/www/.env is ever lost or regenerated fresh
+            # (a PVC reset, or this same image update scenario recurring),
+            # someone will need to manually populate it again with real
+            # values using Laravel-native key names (DB_USERNAME/DB_PASSWORD,
+            # not DB_USER/DB_PASS) - see bug 29 in docs/01-setup-and-runbook.md.
+            # A more permanent fix would mount .env itself from a Secret
+            # (subPath overlay onto /config/www/.env) instead of relying on
+            # this substitution path at all - not done here since it's an
+            # untested change to make live during an active incident.
             - name: DB_HOST
               value: bookstack-db
             - name: DB_USER
