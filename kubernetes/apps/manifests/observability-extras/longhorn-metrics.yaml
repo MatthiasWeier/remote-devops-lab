@@ -1,0 +1,17 @@
+# longhorn-backend's Service (port 9500, name "manager") already exposes
+# volume health/capacity metrics from the upstream Helm install - never
+# wired into Prometheus.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: longhorn
+  namespace: longhorn-system
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: longhorn-manager
+  endpoints:
+    - port: manager
+      interval: 30s

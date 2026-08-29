@@ -1,0 +1,93 @@
+# Exposes Proxmox host-level metrics (CPU/RAM/disk usage, per-VM/CT status
+# for ALL guests including non-K3s ones like the Pterodactyl gameserver) to
+# Prometheus, by polling the Proxmox API remotely - no agent installed on
+# the hypervisor itself. This was a deliberate choice: this session only has
+# a Proxmox API token, not SSH/root access to the host, so anything
+# requiring an on-host agent (temperature via lm-sensors, SMART status)
+# isn't achievable this way - see the runbook for that gap.
+#
+# The `pve-exporter-config` Secret is NOT defined here - same out-of-band
+# pattern as every other secret in this repo. It currently reuses the same
+# `root@pam!terraform` API token Terraform itself uses (Administrator on
+# `/`), which is far more privileged than a read-only metrics exporter
+# needs. Minting a dedicated least-privilege token (PVEAuditor role) was
+# attempted live and blocked by Claude Code's own safety classifier
+# (creating new credentials is a sensitive action) - swap this for one
+# manually via Datacenter > Permissions > API Tokens when convenient:
+#   kubectl create secret generic pve-exporter-config -n monitoring \
+#     --from-literal=pve.yml="default:
+#   user: root@pam
+#   token_name: terraform
+#   token_value: <the actual token secret from terraform.tfvars>
+#   verify_ssl: false
+# "
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pve-exporter
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pve-exporter
+  template:
+    metadata:
+      labels:
+        app: pve-exporter
+    spec:
+      containers:
+        - name: pve-exporter
+          image: prompve/prometheus-pve-exporter:latest
+          ports:
+            - containerPort: 9221
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus/pve.yml
+              subPath: pve.yml
+      volumes:
+        - name: config
+          secret:
+            secretName: pve-exporter-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pve-exporter
+  namespace: monitoring
+  labels:
+    app: pve-exporter
+spec:
+  selector:
+    app: pve-exporter
+  ports:
+    - name: metrics
+      port: 9221
+      targetPort: 9221
+
+---
+# The exporter uses the "multi-target" pattern (like blackbox_exporter) -
+# it doesn't expose ITS OWN metrics at /metrics, it queries whatever
+# Proxmox host you tell it via ?target=... at /pve. `target` is the
+# Proxmox host's address (192.168.178.2, same as proxmox_api_url in
+# terraform.tfvars), not the exporter pod itself.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: pve-exporter
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: pve-exporter
+  endpoints:
+    - port: metrics
+      path: /pve
+      params:
+        module: ["default"]
+        target: ["192.168.178.2"]
+      interval: 60s
+      scrapeTimeout: 30s
