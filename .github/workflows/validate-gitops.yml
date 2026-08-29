@@ -1,0 +1,77 @@
+# Catches exactly the class of bug this repo has hit before pushing reaches
+# the cluster:
+#   - bug 25 (docs/01-setup-and-runbook.md): the tandoor-staging kustomize
+#     overlay referenced `../tandoor/tandoor.yaml` and was rejected by
+#     ArgoCD's LoadRestrictionsRootOnly default - only reproducible by
+#     actually running `kustomize build` against the overlay, which is
+#     exactly what the "Kustomize overlays" job below does.
+#   - plain YAML/schema mistakes in the raw-manifest apps (tandoor, bookstack,
+#     longhorn-ui, metallb-config, observability-extras, immich-postgres) -
+#     caught by kubeconform against upstream Kubernetes' own OpenAPI schemas,
+#     which yamllint alone (a style/syntax linter, not a schema validator)
+#     would not catch.
+name: Validate GitOps manifests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  yamllint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install yamllint
+        run: pip install --disable-pip-version-check yamllint
+      - name: Lint YAML
+        run: yamllint -c .yamllint.yml kubernetes ansible .github
+
+  kustomize-overlays:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build every kustomize overlay
+        run: |
+          set -euo pipefail
+          found=0
+          while IFS= read -r -d '' kfile; do
+            dir=$(dirname "$kfile")
+            echo "::group::kubectl kustomize $dir"
+            kubectl kustomize "$dir" > /dev/null
+            echo "::endgroup::"
+            found=1
+          done < <(find kubernetes/apps/manifests -name kustomization.yaml -print0)
+          if [ "$found" -eq 0 ]; then
+            echo "No kustomization.yaml files found - nothing to build."
+          fi
+
+  kubeconform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin kubeconform
+      - name: Validate raw manifest directories
+        # -ignore-missing-schemas: several kinds here (ArgoCD Application,
+        # cert-manager ClusterIssuer, MetalLB IPAddressPool/L2Advertisement,
+        # Traefik Middleware, Prometheus ServiceMonitor) are CRDs kubeconform
+        # has no bundled schema for - skip those, still fail hard on every
+        # built-in Kubernetes kind (Deployment, Service, Ingress, PVC,
+        # StatefulSet, Secret, ...), which is where a real typo would land.
+        run: |
+          set -euo pipefail
+          for dir in kubernetes/apps/manifests/*/; do
+            if [ -f "${dir}kustomization.yaml" ]; then
+              continue # handled by the kustomize-overlays job instead
+            fi
+            echo "::group::kubeconform $dir"
+            kubeconform -strict -ignore-missing-schemas -summary "${dir}"*.yaml
+            echo "::endgroup::"
+          done
+          echo "::group::kubeconform kubernetes/apps (Application/ClusterIssuer manifests)"
+          kubeconform -strict -ignore-missing-schemas -summary kubernetes/apps/*.yaml
+          echo "::endgroup::"

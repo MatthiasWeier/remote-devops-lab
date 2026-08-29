@@ -1,0 +1,13 @@
+# Deliberately relaxed vs. yamllint's defaults: this repo's manifests carry
+# long explanatory comments (see docs/01-setup-and-runbook.md's "why", not
+# just "what" philosophy) and Helm `values: |` blocks aren't meant to be
+# reformatted to fit an 80-column limit. The goal here is catching real
+# syntax problems (bad indentation, duplicate keys, tabs), not style nits.
+extends: default
+
+rules:
+  line-length: disable
+  document-start: disable
+  comments-indentation: disable
+  truthy:
+    check-keys: false
