@@ -102,31 +102,54 @@ data:
           ] },
           "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": { "calcs": ["lastNotNull"], "values": false } } },
 
-        { "type": "row", "title": "🌐 Traffic (Traefik)", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 13 }, "id": 102 },
+        { "type": "row", "title": "🔔 Alerting Pipeline", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 13 }, "id": 104 },
+
+        { "type": "stat", "title": "ntfy-alertmanager Bridge", "id": 16,
+          "description": "Deliberately reads kube-state-metrics, not the bridge's own /metrics - this panel has to work even when the bridge is the thing that's down, so it can't depend on the bridge for its own data.",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 14 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [{ "expr": "kube_deployment_status_replicas_available{namespace=\"monitoring\", deployment=\"ntfy-alertmanager\"}", "refId": "A" }],
+          "fieldConfig": { "defaults": { "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" } } },
+            { "type": "range", "options": { "from": 1, "to": 999, "result": { "text": "UP", "color": "green" } } }
+          ], "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }, "overrides": [] },
+          "options": { "graphMode": "none", "colorMode": "background", "textMode": "value" } },
+
+        { "type": "stat", "title": "Alertmanager", "id": 17,
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 14 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [{ "expr": "sum(kube_statefulset_status_replicas_ready{namespace=\"monitoring\", statefulset=~\"alertmanager-.*\"})", "refId": "A" }],
+          "fieldConfig": { "defaults": { "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" } } },
+            { "type": "range", "options": { "from": 1, "to": 999, "result": { "text": "UP", "color": "green" } } }
+          ], "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }, "overrides": [] },
+          "options": { "graphMode": "none", "colorMode": "background", "textMode": "value" } },
+
+        { "type": "row", "title": "🌐 Traffic (Traefik)", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 }, "id": 102 },
 
         { "type": "stat", "title": "Requests (last 24h)", "id": 6,
-          "gridPos": { "h": 8, "w": 6, "x": 0, "y": 14 },
+          "gridPos": { "h": 8, "w": 6, "x": 0, "y": 19 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [{ "expr": "sum(increase(traefik_service_requests_total{exported_service!=\"\"}[24h]))", "refId": "A" }],
           "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] },
           "options": { "graphMode": "area", "colorMode": "value" } },
 
         { "type": "timeseries", "title": "Request rate by app (req/s)", "id": 7,
-          "gridPos": { "h": 8, "w": 18, "x": 6, "y": 14 },
+          "gridPos": { "h": 8, "w": 18, "x": 6, "y": 19 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [{ "expr": "sum(rate(traefik_service_requests_total{exported_service!=\"\"}[5m])) by (exported_service)", "legendFormat": "{{exported_service}}", "refId": "A" }],
           "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] } },
 
         { "type": "timeseries", "title": "Requests by HTTP status code (req/s)", "id": 8,
-          "gridPos": { "h": 6, "w": 24, "x": 0, "y": 22 },
+          "gridPos": { "h": 6, "w": 24, "x": 0, "y": 27 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [{ "expr": "sum(rate(traefik_service_requests_total{exported_service!=\"\"}[5m])) by (code)", "legendFormat": "HTTP {{code}}", "refId": "A" }],
           "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] } },
 
-        { "type": "row", "title": "💻 Node & Container Resources", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 28 }, "id": 103 },
+        { "type": "row", "title": "💻 Node & Container Resources", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 33 }, "id": 103 },
 
         { "type": "timeseries", "title": "Node CPU usage %", "id": 9,
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 29 },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [{ "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)", "legendFormat": "{{instance}}", "refId": "A" }],
           "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0,
@@ -134,7 +157,7 @@ data:
             "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 75 }, { "color": "red", "value": 90 }] } }, "overrides": [] } },
 
         { "type": "timeseries", "title": "Node memory usage %", "id": 10,
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 29 },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 34 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [{ "expr": "100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))", "legendFormat": "{{instance}}", "refId": "A" }],
           "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0,
@@ -142,7 +165,7 @@ data:
             "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 75 }, { "color": "red", "value": 90 }] } }, "overrides": [] } },
 
         { "type": "bargauge", "title": "Node disk usage % (root filesystem)", "id": 11,
-          "gridPos": { "h": 5, "w": 24, "x": 0, "y": 37 },
+          "gridPos": { "h": 5, "w": 24, "x": 0, "y": 42 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [{ "expr": "100 * (1 - (node_filesystem_avail_bytes{mountpoint=\"/\", fstype!=\"rootfs\"} / node_filesystem_size_bytes{mountpoint=\"/\", fstype!=\"rootfs\"}))", "legendFormat": "{{instance}}", "refId": "A" }],
           "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "color": { "mode": "thresholds" },
@@ -150,26 +173,26 @@ data:
           "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": { "calcs": ["lastNotNull"], "values": false } } },
 
         { "type": "timeseries", "title": "Container CPU usage by namespace (cores)", "id": 12,
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 47 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [{ "expr": "sum(rate(container_cpu_usage_seconds_total{namespace!=\"\", container!=\"\", container!=\"POD\"}[5m])) by (namespace)", "legendFormat": "{{namespace}}", "refId": "A" }],
           "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] } },
 
         { "type": "timeseries", "title": "Container memory usage by namespace", "id": 13,
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 47 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [{ "expr": "sum(container_memory_working_set_bytes{namespace!=\"\", container!=\"\", container!=\"POD\"}) by (namespace)", "legendFormat": "{{namespace}}", "refId": "A" }],
           "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] } },
 
         { "type": "bargauge", "title": "Top 10 pods by CPU", "id": 14,
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 50 },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 55 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [{ "expr": "topk(10, sum(rate(container_cpu_usage_seconds_total{container!=\"\", container!=\"POD\"}[5m])) by (namespace, pod))", "legendFormat": "{{namespace}}/{{pod}}", "instant": true, "refId": "A" }],
           "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] },
           "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true, "reduceOptions": { "calcs": ["lastNotNull"], "values": false } } },
 
         { "type": "bargauge", "title": "Top 10 pods by memory", "id": 15,
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 50 },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 55 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [{ "expr": "topk(10, sum(container_memory_working_set_bytes{container!=\"\", container!=\"POD\"}) by (namespace, pod))", "legendFormat": "{{namespace}}/{{pod}}", "instant": true, "refId": "A" }],
           "fieldConfig": { "defaults": { "unit": "bytes", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] },

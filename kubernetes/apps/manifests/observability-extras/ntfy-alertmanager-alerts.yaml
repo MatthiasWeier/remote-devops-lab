@@ -1,0 +1,32 @@
+# Watches the thing that's supposed to watch everything else. If
+# ntfy-alertmanager's pod itself dies, Alertmanager's webhook to it starts
+# failing silently - no push notification would ever tell you that,
+# because the notification channel IS what's broken. This alert still
+# routes through the same ntfy receiver (kube-prometheus-stack.yaml), so it
+# genuinely helps for most failure modes (pod crash-looping but restarting,
+# node it's on rebooting, etc.) - restart windows are enough for a firing
+# alert to get out. It does NOT help if the bridge is down for the entire
+# `for: 5m` evaluation window AND stays down - that specific case has no
+# notification path today and needs an out-of-band dead-man's-switch
+# (e.g. healthchecks.io) to close properly. Grafana's "Alerting Pipeline"
+# row on the Homelab Overview dashboard is the fallback that works even
+# then, since it doesn't depend on the bridge at all.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ntfy-alertmanager-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: ntfy-alertmanager
+      rules:
+        - alert: NtfyAlertmanagerBridgeDown
+          expr: kube_deployment_status_replicas_available{namespace="monitoring", deployment="ntfy-alertmanager"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "ntfy-alertmanager bridge has no available replicas"
+            description: "The Alertmanager-to-ntfy bridge has been unavailable for 5+ minutes. Push notifications for every other alert are silently failing until this recovers - check `kubectl get pods -n monitoring -l app=ntfy-alertmanager` directly, don't rely on a push notification to tell you about this one."
