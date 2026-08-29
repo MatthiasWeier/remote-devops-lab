@@ -19,7 +19,7 @@
     growpart {{ root_partition | regex_replace('[0-9]+$', '') }} {{ root_partition | regex_replace('^.*([0-9]+)$', '\1') }}
   register: growpart_root_result
   changed_when: "'CHANGED' in growpart_root_result.stdout"
-  failed_when: 
+  failed_when:
     - growpart_root_result.rc != 0
     - "'NOCHANGE' not in growpart_root_result.stdout"
 
