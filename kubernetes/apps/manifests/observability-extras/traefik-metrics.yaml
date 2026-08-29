@@ -1,0 +1,48 @@
+# Traefik (K3s's bundled version) already runs with --metrics.prometheus=true
+# and a dedicated metrics entrypoint on :9100 out of the box - confirmed via
+# `kubectl get pod -n kube-system -l app.kubernetes.io/name=traefik -o
+# jsonpath='{.items[0].spec.containers[0].args}'`. It's just never exposed as
+# a Kubernetes Service, so Prometheus has nothing to scrape.
+#
+# This is a SEPARATE Service, not an edit to K3s's own auto-managed
+# `traefik` Service in kube-system - that one is reconciled by K3s's
+# helm-controller from an internal HelmChart resource and would fight any
+# manual edit. Selecting the same pods via label instead sidesteps that
+# entirely.
+apiVersion: v1
+kind: Service
+metadata:
+  name: traefik-metrics
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: traefik-metrics
+spec:
+  selector:
+    app.kubernetes.io/name: traefik
+  ports:
+    - name: metrics
+      port: 9100
+      targetPort: 9100
+
+---
+# The `release: kube-prometheus-stack` label is required - that's the exact
+# label the Prometheus CR's serviceMonitorSelector matches on (confirmed via
+# `kubectl get prometheus -n monitoring kube-prometheus-stack-prometheus -o
+# jsonpath='{.spec.serviceMonitorSelector}'`), not a convention guessed at.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: traefik
+  namespace: kube-system
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: traefik-metrics
+  namespaceSelector:
+    matchNames:
+      - kube-system
+  endpoints:
+    - port: metrics
+      interval: 30s

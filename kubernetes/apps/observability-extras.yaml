@@ -1,0 +1,25 @@
+# Wires Traefik's already-running metrics endpoint and ArgoCD's existing
+# metrics Service into Prometheus - neither was being scraped before, both
+# ServiceMonitors are additive (no changes to Traefik/ArgoCD's own configs).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: observability-extras
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/MatthiasWeier/remote-devops-lab.git
+    targetRevision: main
+    path: kubernetes/apps/manifests/observability-extras
+
+  destination:
+    server: https://kubernetes.default.svc
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
