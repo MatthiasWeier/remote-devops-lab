@@ -1,0 +1,32 @@
+# Routes panel.matt-host.de (Pterodactyl, running on VM 200 outside this
+# cluster) through Traefik via TLS passthrough - see
+# kubernetes/apps/manifests/pterodactyl-proxy/. Needed because the FritzBox
+# can only point external 80/443 at one internal host, and that's already
+# the cluster's Traefik LoadBalancer (192.168.178.200) for wiki.matt-host.de
+# etc - this lets Traefik forward panel.matt-host.de on by TLS SNI without
+# owning a second port forward.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pterodactyl-proxy
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/MatthiasWeier/remote-devops-lab.git
+    targetRevision: main
+    path: kubernetes/apps/manifests/pterodactyl-proxy
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: pterodactyl-proxy
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

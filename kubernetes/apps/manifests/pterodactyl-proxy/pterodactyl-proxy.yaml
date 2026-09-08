@@ -1,0 +1,47 @@
+# TLS passthrough to the Pterodactyl panel on VM 200 (192.168.178.25), which
+# lives outside this K3s cluster and holds its own valid Let's Encrypt cert
+# for panel.matt-host.de. Traefik only reads the TLS ClientHello's SNI to
+# route the raw TCP stream there - it never terminates or re-encrypts, so
+# there's no second certificate to manage and no backend-TLS-verification
+# concerns (unlike a normal cert-manager Ingress, which would need Traefik
+# to trust/verify VM 200's cert on the backend hop).
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pterodactyl-panel
+  namespace: pterodactyl-proxy
+spec:
+  ports:
+    - port: 443
+      targetPort: 443
+
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: pterodactyl-panel
+  namespace: pterodactyl-proxy
+subsets:
+  - addresses:
+      - ip: 192.168.178.25
+    ports:
+      - port: 443
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRouteTCP
+metadata:
+  name: pterodactyl-panel
+  namespace: pterodactyl-proxy
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: HostSNI(`panel.matt-host.de`)
+      services:
+        - name: pterodactyl-panel
+          port: 443
+  tls:
+    passthrough: true
