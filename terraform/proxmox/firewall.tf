@@ -171,6 +171,26 @@ resource "proxmox_virtual_environment_cluster_firewall_security_group" "k3s_dmz"
 
   rule {
     type    = "out"
+    action  = "ACCEPT"
+    proto   = "tcp"
+    dport   = "443"
+    dest    = "192.168.178.25"
+    log     = "nolog"
+    comment = "Pterodactyl panel (VM 200) - Traefik's IngressRouteTCP TLS-passthrough for panel.matt-host.de dials this directly, since VM 200 is outside the cluster"
+  }
+
+  rule {
+    type    = "out"
+    action  = "ACCEPT"
+    proto   = "tcp"
+    dport   = "3000"
+    dest    = "192.168.178.163"
+    log     = "nolog"
+    comment = "workout.matt-host.de backend (standalone Debian 13 VM, outside the cluster) - Traefik proxies plain HTTP to this port for the cert-manager-terminated Ingress"
+  }
+
+  rule {
+    type    = "out"
     action  = "DROP"
     dest    = var.management_cidr
     log     = "info"
