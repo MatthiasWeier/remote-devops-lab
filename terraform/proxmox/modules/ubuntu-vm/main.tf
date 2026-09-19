@@ -22,8 +22,12 @@ resource "proxmox_virtual_environment_vm" "proxmox_vm" {
     type  = "x86-64-v2-AES" # Best compatibility for Proxmox 9
   }
 
+  # `floating` is the ballooning minimum. Without it the provider writes
+  # balloon=0, which disables ballooning entirely, so the host can never
+  # reclaim RAM a guest isn't using.
   memory {
     dedicated = var.memory
+    floating  = var.floating_memory
   }
 
   disk {

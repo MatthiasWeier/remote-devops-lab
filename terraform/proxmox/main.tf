@@ -20,6 +20,7 @@ module "ubuntu_vm" {
   # Hardware specifications
   cores               = each.value.cores
   memory              = each.value.memory
+  floating_memory     = each.value.floating_memory
   disk_size           = each.value.disk_size
   secondary_disk_size = each.value.secondary_disk_size
 

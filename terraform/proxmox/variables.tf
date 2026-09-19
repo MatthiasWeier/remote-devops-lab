@@ -43,6 +43,7 @@ variable "vms" {
     role                = string # "control-plane" or "worker"
     cores               = number
     memory              = number
+    floating_memory     = optional(number) # ballooning minimum in MB; null = ballooning off
     disk_size           = number
     secondary_disk_size = optional(number) # e.g. for Longhorn storage on worker nodes
     ip_address          = string

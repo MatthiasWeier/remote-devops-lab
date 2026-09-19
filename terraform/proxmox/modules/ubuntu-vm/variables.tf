@@ -47,6 +47,12 @@ variable "memory" {
   default     = 2048 # 2 GB
 }
 
+variable "floating_memory" {
+  description = "Minimum RAM in MB for memory ballooning (Proxmox `balloon`). Must be <= memory. Leave null to disable ballooning (balloon=0). Enabling or disabling it on an existing VM needs a full stop/start, because the virtio-balloon device is only created at QEMU start."
+  type        = number
+  default     = null
+}
+
 variable "disk_size" {
   description = "Size of the main disk of the VM in GB."
   type        = number
