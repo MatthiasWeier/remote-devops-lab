@@ -81,6 +81,13 @@ spec:
           limits_config:
             retention_period: 168h  # 7 days - homelab, not compliance-driven retention
 
+        # Chart default is 8192 MB, which becomes a 9830Mi scheduler request
+        # (allocatedMemory * 1.2). Far too big for one single-binary Loki with
+        # 7d retention; it only fit while a node reported a full 12 GB and went
+        # Pending everywhere once ballooning shrank a worker.
+        chunksCache:
+          allocatedMemory: 1024
+
         # No S3/MinIO - filesystem storage on the Longhorn PVC above only.
         minio:
           enabled: false
