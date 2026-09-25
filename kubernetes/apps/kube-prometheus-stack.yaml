@@ -116,6 +116,15 @@ spec:
               - name: 'null'
 
         grafana:
+          # The chart bundles ~25 default dashboards (node-exporter, etcd,
+          # coredns, per-namespace/workload/pod resource views, etc.) via its
+          # own defaultDashboards sub-chart - useful as a reference the first
+          # time, but in practice nobody opens most of them once the custom
+          # ones below exist, and they clutter the dashboard list. Off by
+          # default; our own dashboards (this file's ConfigMaps under
+          # manifests/observability-extras/) are unaffected, they're
+          # provisioned by the sidecar independently of this chart value.
+          defaultDashboardsEnabled: false
           persistence:
             enabled: true
             storageClassName: longhorn
