@@ -139,15 +139,16 @@ data:
           "transformations": [
             { "id": "merge", "options": {} },
             { "id": "organize", "options": {
-              "excludeByName": { "Time": true, "__name__": true, "job": true, "endpoint": true, "namespace": true, "pod": true, "service": true, "container": true, "instance": true, "internal_ip": true, "container_runtime_version": true, "kernel_version": true, "kubelet_version": true, "os_image": true, "pod_cidr": true, "provider_id": true, "system_uuid": true },
+              "excludeByName": { "Time": true, "__name__": true, "job": true, "endpoint": true, "namespace": true, "pod": true, "service": true, "container": true, "internal_ip": true, "container_runtime_version": true, "kernel_version": true, "kubelet_version": true, "os_image": true, "pod_cidr": true, "provider_id": true, "system_uuid": true },
               "renameByName": { "node": "Node", "Value #A": "Up", "Value #B": "CPU %", "Value #C": "Memory %", "Value #D": "Disk %", "Value #E": "Uptime" },
-              "indexByName": { "Node": 0, "Up": 1, "CPU %": 2, "Memory %": 3, "Disk %": 4, "Uptime": 5 }
+              "indexByName": { "Node": 0, "Up": 1, "CPU %": 2, "Memory %": 3, "Disk %": 4, "Uptime": 5, "instance": 6 }
             } }
           ],
           "options": { "showHeader": true, "cellHeight": "md", "sortBy": [{ "displayName": "CPU %", "desc": true }] },
           "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
-            "links": [{ "title": "Open Node / VM Detail", "url": "/d/node-detail/node-vm-detail?var-node=${__data.fields.Node}&${__url_time_range}", "targetBlank": false }] },
+            "links": [{ "title": "Open Node / VM Detail", "url": "/d/node-detail/node-vm-detail?var-node=${__data.fields.instance}&${__url_time_range}", "targetBlank": false }] },
             "overrides": [
+              { "matcher": { "id": "byName", "options": "instance" }, "properties": [{ "id": "custom.hidden", "value": true }] },
               { "matcher": { "id": "byName", "options": "Up" }, "properties": [
                 { "id": "custom.displayMode", "value": "color-background" },
                 { "id": "mappings", "value": [
