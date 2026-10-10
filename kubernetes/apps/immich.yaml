@@ -63,6 +63,20 @@ spec:
           main:
             containers:
               main:
+                # TEMPORARY, see 2026-10-10 comment at the top of this block:
+                # v3.2.0 refused to run its migrations straight from
+                # v1.119.0 ("Invalid upgrade path" - docs.immich.app/errors/
+                # #typeorm-upgrade). Immich requires landing on a version in
+                # the 1.132.0-1.136.0 range first to complete intermediate
+                # schema migrations, and no published immich-charts release
+                # between 0.9.1 and 0.13.4 maps to an appVersion in that
+                # window (0.9.x -> v1.119.0, 0.10.0 jumps straight to
+                # v2.0.0) - so force the tag down to v1.132.3 for one sync,
+                # confirm `Running migrations` succeeds and /api/server/
+                # version reports 1.132.3, THEN remove this override (chart
+                # 0.13.4's own default tag is v3.2.0) and sync again.
+                image:
+                  tag: v1.132.3
                 env:
                   DB_HOSTNAME: immich-postgres
                   DB_USERNAME: immich
