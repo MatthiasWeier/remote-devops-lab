@@ -9,13 +9,15 @@ spec:
   project: default
 
   source:
-    repoURL: https://immich-app.github.io/immich-charts
+    # 2026-10-10: the classic repo (https://immich-app.github.io/immich-
+    # charts) stopped being published to after 0.12.1 - confirmed via its
+    # index.yaml, which tops out there. 0.13.x+ only exists as an OCI
+    # artifact at ghcr.io/immich-app/immich-charts (confirmed via the GHCR
+    # anonymous-pull tags/list API). No oci:// scheme prefix on repoURL -
+    # ArgoCD (v3.5.2 here) infers OCI from the bare registry host + a
+    # `chart` field, same as the old classic-repo form otherwise.
+    repoURL: ghcr.io/immich-app/immich-charts
     chart: immich
-    # Immich's chart moves fast and has occasionally changed distribution
-    # method (classic Helm repo vs OCI at ghcr.io/immich-app/immich-charts).
-    # Verify before first apply:
-    #   helm repo add immich https://immich-app.github.io/immich-charts
-    #   helm search repo immich/immich --versions
     targetRevision: 0.13.4
     helm:
       values: |
