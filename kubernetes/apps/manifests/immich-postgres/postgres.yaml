@@ -4,9 +4,24 @@
 # setting `postgresql.enabled: true` makes the chart's own checks.yaml
 # template fail to render at all (not just a warning). See
 # https://github.com/immich-app/immich-charts/issues/149. Immich requires
-# the pgvector/pgvecto-rs extension, which plain postgres images don't have,
-# so this uses the same tensorchord/pgvecto-rs image the deprecated subchart
-# used, with the required extensions created via an init script.
+# a vector-search Postgres extension, which plain postgres images don't have.
+#
+# 2026-10-10: moved off tensorchord/pgvecto-rs (now deprecated upstream) to
+# ghcr.io/immich-app/postgres, Immich's own image, which bundles BOTH the
+# old pgvecto-rs/`vectors` extension AND its replacement, VectorChord/
+# `vchord` - that overlap is deliberate, it's the official migration path
+# (https://docs.immich.app/administration/postgres-standalone): Immich
+# itself reindexes clip_index/face_index onto vchord the first time a
+# vchord-aware server version starts against this image, then `vectors` can
+# be dropped. Keep both CREATE EXTENSION lines below until that migration
+# has run and been confirmed (check for "Reindexed clip_index"/"Reindexed
+# face_index" in the immich-server logs) - only then is it safe to drop
+# `vectors` and move to the leaner postgres image tag without pgvecto-rs.
+#
+# NOTE: init.sql only runs on a brand-new empty PGDATA (docker-entrypoint-
+# initdb.d semantics) - it does NOT re-run on an existing volume. On an
+# in-place upgrade of an already-initialized instance, `CREATE EXTENSION
+# IF NOT EXISTS vchord CASCADE;` has to be run by hand once via psql.
 #
 # Expects `immich-postgres-secret` to already exist in the immich namespace
 # with a `password` key (created manually, see immich.yaml's comments).
@@ -22,6 +37,7 @@ data:
     CREATE EXTENSION IF NOT EXISTS cube;
     CREATE EXTENSION IF NOT EXISTS earthdistance;
     CREATE EXTENSION IF NOT EXISTS vectors;
+    CREATE EXTENSION IF NOT EXISTS vchord CASCADE;
 
 ---
 apiVersion: v1
@@ -55,7 +71,7 @@ spec:
     spec:
       containers:
         - name: postgres
-          image: tensorchord/pgvecto-rs:pg14-v0.2.0
+          image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0
           env:
             - name: POSTGRES_DB
               value: immich
@@ -74,6 +90,8 @@ spec:
               subPath: postgres
             - name: init
               mountPath: /docker-entrypoint-initdb.d
+            - name: dshm
+              mountPath: /dev/shm
       volumes:
         - name: data
           persistentVolumeClaim:
@@ -81,6 +99,10 @@ spec:
         - name: init
           configMap:
             name: immich-postgres-init
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 128Mi
 
 ---
 apiVersion: v1
