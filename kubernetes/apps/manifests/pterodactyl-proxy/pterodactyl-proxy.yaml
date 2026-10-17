@@ -5,6 +5,28 @@
 # there's no second certificate to manage and no backend-TLS-verification
 # concerns (unlike a normal cert-manager Ingress, which would need Traefik
 # to trust/verify VM 200's cert on the backend hop).
+#
+# ArgoCD excludes the `Endpoints` kind from sync by default (confirmed live:
+# app showed an "ExcludedResourceWarning" condition and the object was never
+# created), so the Endpoints below is NOT actually GitOps-managed - it's
+# kept here for documentation only. Apply it once, out of band, same pattern
+# as the out-of-band secrets in bookstack.yaml/tandoor.yaml:
+#   kubectl apply -f kubernetes/apps/manifests/pterodactyl-proxy/pterodactyl-proxy.yaml
+# (harmless to re-run the whole file - Service/IngressRouteTCP are already
+# ArgoCD-managed and will just no-op here).
+#
+# 2026-10-17: VM 200's own Let's Encrypt cert for panel.matt-host.de expired
+# and stopped auto-renewing because nothing on :80 ever reached it. This repo
+# only ever routed :443 (TLS passthrough above) - plain HTTP for this host
+# has no Ingress anywhere, so Traefik's default router swallows it (confirmed
+# live: `curl -H "Host: panel.matt-host.de" http://<public-ip>/.well-known/
+# acme-challenge/x` returned Traefik's own bare "404 page not found", not
+# nginx's or Pterodactyl's error page - the request never left the cluster).
+# The port-80 Service/Ingress below forward just the ACME HTTP-01 challenge
+# path to VM 200's nginx (already fixed there to serve
+# /var/www/certbot/.well-known/acme-challenge/ unconditionally ahead of its
+# own https redirect), so `certbot renew` on VM 200 works - and keeps working
+# unattended - without this cluster ever terminating or seeing VM 200's cert.
 
 ---
 apiVersion: v1
@@ -14,8 +36,12 @@ metadata:
   namespace: pterodactyl-proxy
 spec:
   ports:
-    - port: 443
+    - name: https
+      port: 443
       targetPort: 443
+    - name: http
+      port: 80
+      targetPort: 80
 
 ---
 apiVersion: v1
@@ -27,7 +53,10 @@ subsets:
   - addresses:
       - ip: 192.168.178.25
     ports:
-      - port: 443
+      - name: https
+        port: 443
+      - name: http
+        port: 80
 
 ---
 apiVersion: traefik.io/v1alpha1
@@ -45,3 +74,23 @@ spec:
           port: 443
   tls:
     passthrough: true
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pterodactyl-panel-acme
+  namespace: pterodactyl-proxy
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: panel.matt-host.de
+      http:
+        paths:
+          - path: /.well-known/acme-challenge/
+            pathType: Prefix
+            backend:
+              service:
+                name: pterodactyl-panel
+                port:
+                  number: 80
