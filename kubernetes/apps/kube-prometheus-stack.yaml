@@ -125,6 +125,15 @@ spec:
           # manifests/observability-extras/) are unaffected, they're
           # provisioned by the sidecar independently of this chart value.
           defaultDashboardsEnabled: false
+          # Allows embedding Grafana dashboards in an iframe (Home Assistant's
+          # kitchen dashboard) - Grafana sends X-Frame-Options: deny by
+          # default, which silently blank-screens any iframe embed without
+          # this. Does NOT by itself expose anything publicly - see the
+          # per-dashboard "public dashboard" feature (enabled via the API,
+          # not here) for what HA's iframe actually points at.
+          "grafana.ini":
+            security:
+              allow_embedding: true
           persistence:
             enabled: true
             storageClassName: longhorn
