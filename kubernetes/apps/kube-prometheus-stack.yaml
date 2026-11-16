@@ -137,13 +137,17 @@ spec:
           # session cookie IS set) but then won't attach that cookie to the
           # next request because it's a third-party/cross-site context
           # (default SameSite=Lax), so the iframe bounces right back to the
-          # login screen in a loop. Safe only because Grafana is served over
-          # HTTPS (cookie_secure, on by default) - SameSite=None without
-          # Secure is rejected by browsers outright.
+          # login screen in a loop. SameSite=None requires the Secure
+          # attribute too, or browsers reject the cookie outright - but
+          # Grafana's cookie_secure is false by default and does NOT
+          # auto-detect that Traefik is terminating TLS in front of it
+          # (Grafana itself only ever sees plain HTTP), so it has to be set
+          # explicitly here rather than relying on a default.
           "grafana.ini":
             security:
               allow_embedding: true
               cookie_samesite: none
+              cookie_secure: true
           persistence:
             enabled: true
             storageClassName: longhorn
